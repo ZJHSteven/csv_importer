@@ -1,0 +1,5 @@
+{
+    "default_delimiter": ",",
+    "auto_detect_notetype": true,
+    "auto_detect_deck": true
+}
