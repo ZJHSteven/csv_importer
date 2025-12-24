@@ -101,8 +101,9 @@ def open_browser_with_note_ids(mw, note_ids: List[int]) -> None:  # 说明：打
 
 def build_note_id_query(note_ids: List[int]) -> str:  # 说明：根据笔记 ID 构造搜索语句
     unique_ids = [str(note_id) for note_id in dict.fromkeys(note_ids)]  # 说明：去重并保持顺序
-    parts = [f"nid:{note_id}" for note_id in unique_ids]  # 说明：构造 nid 查询片段
-    return " or ".join(parts)  # 说明：用 OR 连接为搜索语句
+    if not unique_ids:  # 说明：空列表保护
+        return ""  # 说明：返回空查询
+    return f"nid:{','.join(unique_ids)}"  # 说明：使用官方常见的逗号语法
 
 
 def _set_browser_search_text(browser, query: str) -> None:  # 说明：兼容不同搜索框组件
@@ -140,22 +141,20 @@ def open_browser_with_query(mw, query: str) -> None:  # 说明：打开 Anki 浏
 def _run_browser_search(browser, query: str) -> None:  # 说明：兼容不同版本的搜索方式
     if browser is None:  # 说明：浏览器对象为空
         return  # 说明：无法执行搜索
+    _set_browser_search_text(browser, query)  # 说明：先写入查询，保持 UI 与实际一致
+    if hasattr(browser, "onSearchActivated"):  # 说明：优先使用与回车一致的搜索入口
+        browser.onSearchActivated()  # 说明：触发搜索
+        return  # 说明：结束处理
+    if hasattr(browser, "search_for"):  # 说明：旧版本 search_for 接口
+        browser.search_for(query)  # 说明：执行搜索
+        return  # 说明：结束处理
     if hasattr(browser, "search"):  # 说明：新版本 search 接口
         try:  # 说明：捕获不同签名导致的异常
             browser.search(query)  # 说明：优先按带参数调用
             return  # 说明：结束处理
         except TypeError:  # 说明：search 无参数版本
-            if hasattr(browser, "form") and hasattr(browser.form, "searchEdit"):  # 说明：搜索框存在
-                _set_browser_search_text(browser, query)  # 说明：写入搜索文本
-                browser.search()  # 说明：触发无参搜索
-                return  # 说明：结束处理
-    if hasattr(browser, "search_for"):  # 说明：旧版本 search_for 接口
-        browser.search_for(query)  # 说明：执行搜索
-        return  # 说明：结束处理
-    if hasattr(browser, "form") and hasattr(browser.form, "searchEdit"):  # 说明：兜底使用搜索框
-        _set_browser_search_text(browser, query)  # 说明：写入搜索文本
-        if hasattr(browser, "onSearchActivated"):  # 说明：触发搜索
-            browser.onSearchActivated()  # 说明：执行搜索动作
+            browser.search()  # 说明：触发无参搜索
+            return  # 说明：结束处理
 
 
 def normalize_deck_tag(deck_name: str, strip_regex: str) -> str:  # 说明：从牌堆名生成标签
