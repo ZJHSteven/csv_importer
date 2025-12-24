@@ -6,7 +6,7 @@
 from __future__ import annotations  # 说明：允许前向引用类型标注
 
 import re  # 说明：用于清理牌堆名前缀
-from typing import List, Optional  # 说明：类型标注所需
+from typing import Any, List, Optional, cast  # 说明：类型标注所需
 
 from .addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
 
@@ -110,7 +110,7 @@ def _set_browser_search_text(browser, query: str) -> None:  # 说明：兼容不
         return  # 说明：直接返回
     if not hasattr(browser, "form"):  # 说明：无表单对象
         return  # 说明：直接返回
-    search_widget = getattr(browser.form, "searchEdit", None)  # 说明：获取搜索控件
+    search_widget = cast(Any, getattr(browser.form, "searchEdit", None))  # 说明：获取搜索控件并放宽类型
     if search_widget is None:  # 说明：控件不存在
         return  # 说明：直接返回
     if hasattr(search_widget, "setText"):  # 说明：QLineEdit 等支持 setText
@@ -120,7 +120,7 @@ def _set_browser_search_text(browser, query: str) -> None:  # 说明：兼容不
         search_widget.setCurrentText(query)  # 说明：写入搜索文本
         return  # 说明：结束处理
     if hasattr(search_widget, "lineEdit") and callable(search_widget.lineEdit):  # 说明：可访问 lineEdit
-        line_edit = search_widget.lineEdit()  # 说明：获取内置输入框
+        line_edit = cast(Any, search_widget.lineEdit())  # 说明：获取内置输入框并放宽类型
         if line_edit is not None and hasattr(line_edit, "setText"):  # 说明：支持 setText
             line_edit.setText(query)  # 说明：写入搜索文本
             return  # 说明：结束处理
