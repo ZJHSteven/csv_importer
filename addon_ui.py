@@ -330,6 +330,9 @@ class TtsTab(QWidget):  # 说明：TTS 页面
 
     def _scan_tasks(self) -> None:  # 说明：扫描需要生成的笔记
         english_tag = self._config.get("tts", {}).get("english_tag", "英文")  # 说明：读取英文标签
+        if mw.col is None:  # 说明：集合未加载或已关闭
+            showInfo("当前未加载集合，无法扫描 TTS 任务。")  # 说明：提示用户
+            return  # 说明：中止扫描流程
         note_ids: List[int] = []  # 说明：初始化 ID 列表
         if self._use_import_scope.isChecked():  # 说明：仅使用导入范围
             note_ids = self._get_import_ids()  # 说明：读取最近导入 ID
