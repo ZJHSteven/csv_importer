@@ -38,6 +38,12 @@ class TtsError(CsvImporterError):  # 说明：TTS 相关异常
     pass  # 说明：无额外逻辑
 
 
+class SessionError(CsvImporterError):  # 说明：会话记录相关异常
+    """导入会话记录与回滚时的异常。"""  # 说明：中文解释异常范围
+
+    pass  # 说明：无额外逻辑
+
+
 class AppLogger:  # 说明：统一日志封装，便于后续替换为 Anki 的 UI 日志
     """统一日志封装。"""  # 说明：简要说明用途
 

@@ -59,13 +59,76 @@ def update_note(mw, note) -> None:  # 说明：更新笔记
     mw.col.update_note(note)  # 说明：写回修改
 
 
+def update_note_fields_and_tags(mw, note_id: int, field_values: List[str], tags: List[str]) -> None:  # 说明：按字段与标签更新笔记
+    note = mw.col.get_note(note_id)  # 说明：获取笔记对象
+    if note is None:  # 说明：笔记不存在
+        raise ImportProcessError(f"未找到笔记: {note_id}")  # 说明：抛出导入异常
+    for index, value in enumerate(field_values):  # 说明：逐字段更新
+        if index < len(note.fields):  # 说明：避免越界
+            note.fields[index] = value  # 说明：写入字段
+    for tag in tags:  # 说明：合并标签
+        if tag not in note.tags:  # 说明：避免重复
+            note.tags.append(tag)  # 说明：追加标签
+    mw.col.update_note(note)  # 说明：保存更新
+
+
 def find_notes(mw, query: str) -> List[int]:  # 说明：根据搜索语句查询笔记
     try:  # 说明：捕获查询异常
         ids = mw.col.find_notes(query)  # 说明：执行查询
         return [int(note_id) for note_id in ids]  # 说明：确保返回 int 列表
     except Exception as exc:  # 说明：捕获异常
         logger.error(f"查找笔记失败: {exc}")  # 说明：记录日志
-        return []  # 说明：失败时返回空列表
+    return []  # 说明：失败时返回空列表
+
+
+def get_all_deck_names(mw) -> List[str]:  # 说明：获取所有牌堆名称
+    if mw is None or mw.col is None:  # 说明：集合未就绪
+        return []  # 说明：返回空列表
+    decks = mw.col.decks  # 说明：获取牌堆管理器
+    if hasattr(decks, "all_names"):  # 说明：新版本接口
+        return list(decks.all_names())  # 说明：返回全部名称
+    if hasattr(decks, "allNames"):  # 说明：旧版本接口
+        return list(decks.allNames())  # 说明：返回全部名称
+    return []  # 说明：兜底返回空列表
+
+
+def open_browser_with_note_ids(mw, note_ids: List[int]) -> None:  # 说明：打开浏览器并定位到指定笔记
+    if not note_ids:  # 说明：空列表无需操作
+        return  # 说明：直接返回
+    query = build_note_id_query(note_ids)  # 说明：构造搜索语句
+    open_browser_with_query(mw, query)  # 说明：打开浏览器并执行搜索
+
+
+def build_note_id_query(note_ids: List[int]) -> str:  # 说明：根据笔记 ID 构造搜索语句
+    unique_ids = [str(note_id) for note_id in dict.fromkeys(note_ids)]  # 说明：去重并保持顺序
+    parts = [f"nid:{note_id}" for note_id in unique_ids]  # 说明：构造 nid 查询片段
+    return " or ".join(parts)  # 说明：用 OR 连接为搜索语句
+
+
+def open_browser_with_query(mw, query: str) -> None:  # 说明：打开 Anki 浏览器并执行搜索
+    if mw is None:  # 说明：主窗口为空
+        return  # 说明：无法打开浏览器
+    try:  # 说明：捕获浏览器打开异常
+        from aqt import dialogs  # 说明：延迟导入，减少启动依赖
+        browser = dialogs.open("Browser", mw)  # 说明：打开或复用浏览器
+        _run_browser_search(browser, query)  # 说明：执行搜索
+    except Exception as exc:  # 说明：捕获异常
+        logger.error(f"打开浏览器失败: {exc}")  # 说明：记录错误
+
+
+def _run_browser_search(browser, query: str) -> None:  # 说明：兼容不同版本的搜索方式
+    if browser is None:  # 说明：浏览器对象为空
+        return  # 说明：无法执行搜索
+    if hasattr(browser, "search"):  # 说明：新版本 search 接口
+        browser.search(query)  # 说明：直接搜索
+        return  # 说明：结束处理
+    if hasattr(browser, "search_for"):  # 说明：旧版本 search_for 接口
+        browser.search_for(query)  # 说明：执行搜索
+        return  # 说明：结束处理
+    if hasattr(browser, "form") and hasattr(browser.form, "searchEdit"):  # 说明：兜底使用搜索框
+        browser.form.searchEdit.setText(query)  # 说明：写入搜索文本
+        if hasattr(browser, "onSearchActivated"):  # 说明：触发搜索
+            browser.onSearchActivated()  # 说明：执行搜索动作
 
 
 def normalize_deck_tag(deck_name: str, strip_regex: str) -> str:  # 说明：从牌堆名生成标签

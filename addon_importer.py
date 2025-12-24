@@ -15,16 +15,28 @@ from .addon_anki import (  # 说明：导入 Anki 交互封装
     get_notetype_field_names,  # 说明：获取字段名
     get_or_create_deck_id,  # 说明：获取或创建牌堆
     normalize_deck_tag,  # 说明：清理牌堆标签
-    update_note,  # 说明：更新笔记
+    update_note_fields_and_tags,  # 说明：更新字段与标签
 )
 from .addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
-from .addon_models import ImportResult, ParseResult  # 说明：数据结构
+from .addon_models import ImportResult, ImportSession, ImportSessionItem, ParseResult  # 说明：数据结构
+from .addon_session import generate_session_id, save_import_session  # 说明：会话记录能力
 
 
-def import_parse_result(mw, parse_result: ParseResult, config: dict) -> ImportResult:  # 说明：导入入口
+def import_parse_result(mw, parse_result: ParseResult, config: dict, source_path: str = "") -> ImportResult:  # 说明：导入入口
     result = ImportResult()  # 说明：初始化导入结果
+    session_id = generate_session_id()  # 说明：生成会话 ID
+    session = ImportSession(  # 说明：初始化会话对象
+        session_id=session_id,  # 说明：会话 ID
+        created_at=session_id,  # 说明：创建时间（与 ID 同步）
+        source_path=source_path,  # 说明：源文件路径
+        duplicate_mode=str(config.get("duplicate_mode", "")),  # 说明：保存重复策略
+        items=[],  # 说明：初始化条目列表
+    )
     for section in parse_result.sections:  # 说明：逐分段导入
-        _import_section(mw, section, config, result)  # 说明：导入单个分段
+        _import_section(mw, section, config, result, session)  # 说明：导入单个分段
+    result.session_id = session_id  # 说明：写入会话 ID
+    keep_limit = int(config.get("import_session_keep_limit", 20))  # 说明：读取会话保留上限
+    save_import_session(session, keep_limit=keep_limit)  # 说明：保存会话记录
     return result  # 说明：返回统计结果
 
 
@@ -40,7 +52,17 @@ def _normalize_duplicate_mode(value: str) -> str:  # 说明：统一重复处理
     return mapping.get(str(value), "duplicate")  # 说明：未知值回退默认
 
 
-def _import_section(mw, section, config: dict, result: ImportResult) -> None:  # 说明：导入单个分段
+def _snapshot_note_fields(mw, note_id: int) -> List[str]:  # 说明：获取笔记字段快照
+    note = mw.col.get_note(note_id)  # 说明：读取笔记对象
+    return list(note.fields) if note else []  # 说明：返回字段列表
+
+
+def _snapshot_note_tags(mw, note_id: int) -> List[str]:  # 说明：获取笔记标签快照
+    note = mw.col.get_note(note_id)  # 说明：读取笔记对象
+    return list(note.tags) if note else []  # 说明：返回标签列表
+
+
+def _import_section(mw, section, config: dict, result: ImportResult, session: ImportSession) -> None:  # 说明：导入单个分段
     note_type_map = config.get("note_type_map", {})  # 说明：读取题型映射
     mapped_type = note_type_map.get(section.note_type, section.note_type)  # 说明：映射题型到笔记类型
     deck_id = get_or_create_deck_id(mw, section.deck_name)  # 说明：获取牌堆 ID
@@ -80,16 +102,70 @@ def _import_section(mw, section, config: dict, result: ImportResult) -> None:  #
             )
             if duplicated_ids and duplicate_mode == "skip":  # 说明：遇到重复且选择跳过
                 result.skipped += 1  # 说明：统计跳过
+                target_id = int(duplicated_ids[0])  # 说明：默认记录第一条重复
+                result.skipped_note_ids.append(target_id)  # 说明：记录跳过笔记 ID
+                result.duplicate_note_ids.extend([int(note_id) for note_id in duplicated_ids])  # 说明：记录所有重复 ID
+                session.items.append(  # 说明：写入会话记录
+                    ImportSessionItem(
+                        line_no=row.line_no,  # 说明：源行号
+                        action="skipped",  # 说明：动作类型
+                        note_id=target_id,  # 说明：关联的笔记 ID
+                        deck_name=section.deck_name,  # 说明：牌堆名称
+                        note_type=section.note_type,  # 说明：题型名称
+                        fields=field_values,  # 说明：导入字段
+                        tags=all_tags,  # 说明：导入标签
+                        old_fields=_snapshot_note_fields(mw, target_id),  # 说明：保存原字段快照
+                        old_tags=_snapshot_note_tags(mw, target_id),  # 说明：保存原标签快照
+                        duplicate_note_ids=[int(note_id) for note_id in duplicated_ids],  # 说明：重复笔记列表
+                    )
+                )
                 continue  # 说明：跳过该行
             if duplicated_ids and duplicate_mode == "update":  # 说明：遇到重复且选择更新
-                _update_existing_note(mw, duplicated_ids[0], field_values, all_tags)  # 说明：更新第一条
+                target_id = int(duplicated_ids[0])  # 说明：默认更新第一条重复
+                old_fields = _snapshot_note_fields(mw, target_id)  # 说明：更新前字段快照
+                old_tags = _snapshot_note_tags(mw, target_id)  # 说明：更新前标签快照
+                update_note_fields_and_tags(mw, target_id, field_values, all_tags)  # 说明：更新第一条
                 result.updated += 1  # 说明：统计更新
-                result.imported_note_ids.append(int(duplicated_ids[0]))  # 说明：记录更新的笔记 ID
+                result.updated_note_ids.append(target_id)  # 说明：记录更新 ID
+                result.imported_note_ids.append(target_id)  # 说明：记录导入 ID
+                result.duplicate_note_ids.extend([int(note_id) for note_id in duplicated_ids])  # 说明：记录重复 ID
+                session.items.append(  # 说明：写入会话记录
+                    ImportSessionItem(
+                        line_no=row.line_no,  # 说明：源行号
+                        action="updated",  # 说明：动作类型
+                        note_id=target_id,  # 说明：更新的笔记 ID
+                        deck_name=section.deck_name,  # 说明：牌堆名称
+                        note_type=section.note_type,  # 说明：题型名称
+                        fields=field_values,  # 说明：导入字段
+                        tags=all_tags,  # 说明：导入标签
+                        old_fields=old_fields,  # 说明：旧字段快照
+                        old_tags=old_tags,  # 说明：旧标签快照
+                        duplicate_note_ids=[int(note_id) for note_id in duplicated_ids],  # 说明：重复笔记列表
+                    )
+                )
                 continue  # 说明：更新完成后跳过新增
             note = create_note(mw, notetype, field_values)  # 说明：创建新笔记
             note.tags = all_tags  # 说明：写入标签
             add_note_to_deck(mw, note, deck_id)  # 说明：添加到指定牌堆
             result.added += 1  # 说明：统计新增
+            if note.id:  # 说明：确保有 ID
+                note_id = int(note.id)  # 说明：转换为 int
+                result.imported_note_ids.append(note_id)  # 说明：记录新增的笔记 ID
+                result.added_note_ids.append(note_id)  # 说明：记录新增 ID
+                if duplicated_ids:  # 说明：存在重复记录
+                    result.duplicate_note_ids.extend([int(note_id) for note_id in duplicated_ids])  # 说明：记录重复 ID
+                session.items.append(  # 说明：写入会话记录
+                    ImportSessionItem(
+                        line_no=row.line_no,  # 说明：源行号
+                        action="added",  # 说明：动作类型
+                        note_id=note_id,  # 说明：新增的笔记 ID
+                        deck_name=section.deck_name,  # 说明：牌堆名称
+                        note_type=section.note_type,  # 说明：题型名称
+                        fields=field_values,  # 说明：导入字段
+                        tags=all_tags,  # 说明：导入标签
+                        duplicate_note_ids=[int(note_id) for note_id in duplicated_ids],  # 说明：重复笔记列表
+                    )
+                )
             if note.id:  # 说明：确保有 ID
                 result.imported_note_ids.append(int(note.id))  # 说明：记录新增的笔记 ID
         except Exception as exc:  # 说明：捕获单行异常
@@ -160,17 +236,6 @@ def _find_duplicates(  # 说明：查找重复笔记
 
 def _escape_search_value(value: str) -> str:  # 说明：转义搜索字符串
     return value.replace('"', '\\"')  # 说明：将双引号替换为转义形式
-
-
-def _update_existing_note(mw, note_id: int, field_values: List[str], tags: List[str]) -> None:  # 说明：更新已有笔记
-    note = mw.col.get_note(note_id)  # 说明：获取笔记对象
-    for index, value in enumerate(field_values):  # 说明：逐字段更新
-        if index < len(note.fields):  # 说明：避免越界
-            note.fields[index] = value  # 说明：写入字段
-    for tag in tags:  # 说明：合并标签
-        if tag not in note.tags:  # 说明：避免重复
-            note.tags.append(tag)  # 说明：追加标签
-    update_note(mw, note)  # 说明：保存更新
 
 
 def _record_error(result: ImportResult, message: str) -> None:  # 说明：统一错误记录

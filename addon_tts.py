@@ -49,8 +49,8 @@ def azure_synthesize(  # 说明：Azure 合成入口
     return data  # 说明：返回音频数据
 
 
-def build_audio_filename(text: str, voice_name: str, suffix: str = "mp3") -> str:  # 说明：生成稳定音频文件名
-    raw = f"{voice_name}|{text}".encode("utf-8")  # 说明：构造哈希输入
+def build_audio_filename(text: str, voice_name: str, rate: str = "default", suffix: str = "mp3") -> str:  # 说明：生成稳定音频文件名
+    raw = f"{voice_name}|{rate}|{text}".encode("utf-8")  # 说明：构造哈希输入
     digest = hashlib.md5(raw).hexdigest()  # 说明：生成 MD5 哈希
     return f"tts_{digest}.{suffix}"  # 说明：返回文件名
 
@@ -64,13 +64,17 @@ def ensure_audio_for_tasks(mw, tasks: List[TtsTask], config: Dict[str, Any]) -> 
     for task in tasks:  # 说明：逐任务执行
         try:  # 说明：单条失败不影响整体
             note = mw.col.get_note(task.note_id)  # 说明：读取笔记对象
+            if note is None:  # 说明：笔记不存在
+                raise TtsError(f"笔记不存在: {task.note_id}")  # 说明：抛出统一异常
             if _field_has_audio_marker(note, task.target_field):  # 说明：已有音频标记则跳过
                 result.skipped += 1  # 说明：统计跳过
                 continue  # 说明：跳过该任务
-            filename = build_audio_filename(task.text, task.voice_name)  # 说明：生成稳定文件名
+            rate = str(azure_cfg.get("defaults", {}).get("rate", "default"))  # 说明：读取语速配置
+            filename = build_audio_filename(task.text, task.voice_name, rate=rate)  # 说明：生成稳定文件名
             if mw.col.media.have(filename):  # 说明：媒体已存在
-                result.skipped += 1  # 说明：统计跳过
-                continue  # 说明：跳过该任务
+                _append_audio_marker(mw, task.note_id, task.target_field, filename, config)  # 说明：直接复用媒体并写入标记
+                result.reused += 1  # 说明：统计复用数量
+                continue  # 说明：跳过合成
             audio_data = azure_synthesize(azure_cfg, task.text, task.voice_name)  # 说明：调用 Azure 合成
             mw.col.media.write_data(filename, audio_data)  # 说明：写入媒体文件
             _append_audio_marker(mw, task.note_id, task.target_field, filename, config)  # 说明：写入音频标记
@@ -84,6 +88,8 @@ def ensure_audio_for_tasks(mw, tasks: List[TtsTask], config: Dict[str, Any]) -> 
 
 def _append_audio_marker(mw, note_id: int, field_name: str, filename: str, config: Dict[str, Any]) -> None:  # 说明：向字段追加音频标记
     note = mw.col.get_note(note_id)  # 说明：获取笔记
+    if not config.get("auto_append_marker", True):  # 说明：未启用自动追加
+        return  # 说明：直接返回
     marker_format = config.get("audio_marker_format", " [sound:{filename}]")  # 说明：读取标记模板
     marker = marker_format.format(filename=filename)  # 说明：生成标记文本
     if field_name not in note:  # 说明：字段不存在

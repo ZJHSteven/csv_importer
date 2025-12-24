@@ -11,3 +11,6 @@ wheels/
 
 # Anki 运行时生成的元数据文件
 meta.json
+
+# 插件运行时会话与用户数据
+user_files/

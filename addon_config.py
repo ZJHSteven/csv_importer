@@ -18,6 +18,9 @@ def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置
         "type_line_allow_english_colon": True,  # 说明：题型行允许英文冒号
         "allow_html": True,  # 说明：默认允许 HTML
         "duplicate_mode": "保留重复",  # 说明：默认重复处理方式（保留重复/覆盖更新/跳过重复）
+        "import_session_keep_limit": 20,  # 说明：保留的导入会话数量上限
+        "import_auto_open_browser": True,  # 说明：导入后自动打开浏览器
+        "import_auto_open_duplicate_browser": False,  # 说明：导入后是否打开重复笔记浏览器
         "tags_add_chapter": True,  # 说明：自动补充章节标签
         "tags_add_note_type": True,  # 说明：自动补充题型标签
         "deck_prefix_strip_regex": r"^\d+[\-_.]+",  # 说明：去掉牌堆名前的序号前缀
@@ -38,6 +41,9 @@ def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置
             "audio_field_index": 0,  # 说明：写入音频标记的字段索引
             "audio_marker_format": " [sound:{filename}]",  # 说明：音频标记写入格式
             "auto_append_marker": True,  # 说明：是否自动追加音频标记
+            "open_browser_after_run": True,  # 说明：TTS 完成后自动打开浏览器
+            "scan_limit_decks": False,  # 说明：扫描时是否限制牌组
+            "scan_decks": [],  # 说明：扫描时选中的牌组列表
             "azure": {  # 说明：Azure TTS 配置
                 "base_url": "",  # 说明：Azure 端点基础 URL
                 "subscription_key": "",  # 说明：Azure 订阅密钥
