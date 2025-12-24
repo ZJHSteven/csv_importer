@@ -87,8 +87,9 @@ class ImportTab(QWidget):  # 说明：导入页面
         path_layout.addWidget(browse_btn)  # 说明：加入按钮
         form.addRow("导入文件路径", path_layout)  # 说明：添加表单行
         self._duplicate_combo = QComboBox()  # 说明：重复处理下拉框
-        self._duplicate_combo.addItems(["duplicate", "update", "skip"])  # 说明：可选项
-        self._duplicate_combo.setCurrentText(self._config.get("duplicate_mode", "duplicate"))  # 说明：设置默认
+        self._duplicate_combo.addItems(["保留重复", "覆盖更新", "跳过重复"])  # 说明：可选项（中文显示）
+        current_duplicate = _normalize_duplicate_mode_label(self._config.get("duplicate_mode", "保留重复"))  # 说明：读取并规范化默认值
+        self._duplicate_combo.setCurrentText(current_duplicate)  # 说明：设置默认
         self._duplicate_combo.currentTextChanged.connect(self._on_duplicate_mode_changed)  # 说明：保存修改
         form.addRow("重复处理", self._duplicate_combo)  # 说明：添加表单行
         self._allow_html = QCheckBox("允许 HTML")  # 说明：HTML 选项
@@ -122,7 +123,7 @@ class ImportTab(QWidget):  # 说明：导入页面
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _on_duplicate_mode_changed(self, value: str) -> None:  # 说明：重复模式变更
-        self._config["duplicate_mode"] = value  # 说明：更新配置
+        self._config["duplicate_mode"] = value  # 说明：直接保存中文值
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _on_allow_html_changed(self, _state: int) -> None:  # 说明：HTML 选项变更
@@ -362,3 +363,15 @@ def _filter_note_ids_by_tag(mw, note_ids: List[int], tag_name: str) -> List[int]
         return note_ids  # 说明：兜底返回原始列表
     tagged_ids = set(mw.col.find_notes(f'tag:"{tag_name}"'))  # 说明：查询包含指定标签的笔记
     return [note_id for note_id in note_ids if note_id in tagged_ids]  # 说明：保留交集
+
+
+def _normalize_duplicate_mode_label(value: str) -> str:  # 说明：将重复模式统一为中文显示
+    mapping = {  # 说明：兼容旧英文与中文配置
+        "duplicate": "保留重复",  # 说明：旧英文值映射
+        "update": "覆盖更新",  # 说明：旧英文值映射
+        "skip": "跳过重复",  # 说明：旧英文值映射
+        "保留重复": "保留重复",  # 说明：已是中文
+        "覆盖更新": "覆盖更新",  # 说明：已是中文
+        "跳过重复": "跳过重复",  # 说明：已是中文
+    }  # 说明：映射表结束
+    return mapping.get(str(value), "保留重复")  # 说明：未知值回退默认

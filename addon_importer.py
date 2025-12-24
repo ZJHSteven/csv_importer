@@ -28,6 +28,18 @@ def import_parse_result(mw, parse_result: ParseResult, config: dict) -> ImportRe
     return result  # 说明：返回统计结果
 
 
+def _normalize_duplicate_mode(value: str) -> str:  # 说明：统一重复处理模式为英文内部值
+    mapping = {  # 说明：兼容中文与旧英文值
+        "duplicate": "duplicate",  # 说明：已是英文内部值
+        "update": "update",  # 说明：已是英文内部值
+        "skip": "skip",  # 说明：已是英文内部值
+        "保留重复": "duplicate",  # 说明：中文值映射为内部值
+        "覆盖更新": "update",  # 说明：中文值映射为内部值
+        "跳过重复": "skip",  # 说明：中文值映射为内部值
+    }  # 说明：映射表结束
+    return mapping.get(str(value), "duplicate")  # 说明：未知值回退默认
+
+
 def _import_section(mw, section, config: dict, result: ImportResult) -> None:  # 说明：导入单个分段
     note_type_map = config.get("note_type_map", {})  # 说明：读取题型映射
     mapped_type = note_type_map.get(section.note_type, section.note_type)  # 说明：映射题型到笔记类型
@@ -39,7 +51,7 @@ def _import_section(mw, section, config: dict, result: ImportResult) -> None:  #
     tags_add_note_type = bool(config.get("tags_add_note_type", True))  # 说明：是否补充题型标签
     tags_splitter = str(config.get("tags_splitter", " "))  # 说明：标签分隔符
     strip_regex = str(config.get("deck_prefix_strip_regex", r"^\d+[\-_.]+"))  # 说明：牌堆前缀清理正则
-    duplicate_mode = str(config.get("duplicate_mode", "duplicate"))  # 说明：重复处理方式
+    duplicate_mode = _normalize_duplicate_mode(str(config.get("duplicate_mode", "保留重复")))  # 说明：重复处理方式
     tags_from_extra = bool(config.get("tags_from_extra_column", True))  # 说明：是否从额外列读取标签
     joiner = str(config.get("field_extra_joiner", "\n"))  # 说明：字段拼接符
     scope_deck_only = bool(config.get("import_scope_deck_only", True))  # 说明：重复检测范围

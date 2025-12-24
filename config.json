@@ -4,7 +4,7 @@
   "deck_line_prefix": "//",
   "type_line_allow_english_colon": true,
   "allow_html": true,
-  "duplicate_mode": "duplicate",
+  "duplicate_mode": "保留重复",
   "tags_add_chapter": true,
   "tags_add_note_type": true,
   "deck_prefix_strip_regex": "^\\d+[\\-_.]+",
