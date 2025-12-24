@@ -120,8 +120,14 @@ def _run_browser_search(browser, query: str) -> None:  # 说明：兼容不同�
     if browser is None:  # 说明：浏览器对象为空
         return  # 说明：无法执行搜索
     if hasattr(browser, "search"):  # 说明：新版本 search 接口
-        browser.search(query)  # 说明：直接搜索
-        return  # 说明：结束处理
+        try:  # 说明：捕获不同签名导致的异常
+            browser.search(query)  # 说明：优先按带参数调用
+            return  # 说明：结束处理
+        except TypeError:  # 说明：search 无参数版本
+            if hasattr(browser, "form") and hasattr(browser.form, "searchEdit"):  # 说明：搜索框存在
+                browser.form.searchEdit.setText(query)  # 说明：写入搜索文本
+                browser.search()  # 说明：触发无参搜索
+                return  # 说明：结束处理
     if hasattr(browser, "search_for"):  # 说明：旧版本 search_for 接口
         browser.search_for(query)  # 说明：执行搜索
         return  # 说明：结束处理
