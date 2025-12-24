@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Anki 运行时生成的元数据文件
+meta.json
