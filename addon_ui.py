@@ -214,89 +214,6 @@ class ImportTab(QWidget):  # 说明：导入页面
         except Exception as exc:  # 说明：捕获异常
             showInfo(f"导入失败: {exc}")  # 说明：提示错误
 
-
-class DuplicateReviewDialog(QDialog):  # 说明：重复处理对话框
-    """用于把“跳过的重复项”改为更新，支持批量选择。"""  # 说明：类说明
-
-    def __init__(self, session_id: str, parent=None) -> None:  # 说明：初始化
-        super().__init__(parent)  # 说明：调用父类初始化
-        self._session_id = session_id  # 说明：保存会话 ID
-        self._session = load_import_session(session_id)  # 说明：读取会话记录
-        self._items = [item for item in self._session.items if item.action == "skipped"]  # 说明：筛选跳过项
-        self._row_items: List[ImportSessionItem] = []  # 说明：表格行与条目映射
-        self._build_ui()  # 说明：构建界面
-
-    def _build_ui(self) -> None:  # 说明：构建界面
-        self.setWindowTitle("处理重复项（改策略）")  # 说明：设置窗口标题
-        layout = QVBoxLayout()  # 说明：主布局
-        self.setLayout(layout)  # 说明：应用布局
-        self._table = QTableWidget(0, 6)  # 说明：初始化表格
-        self._table.setHorizontalHeaderLabels(["选择", "行号", "笔记ID", "字段预览", "牌堆", "题型"])  # 说明：设置表头
-        layout.addWidget(self._table)  # 说明：加入主布局
-        self._render_items()  # 说明：渲染重复项
-        btn_layout = QHBoxLayout()  # 说明：按钮布局
-        self._apply_btn = QPushButton("应用更新")  # 说明：应用按钮
-        self._apply_btn.clicked.connect(self._apply_updates)  # 说明：绑定事件
-        self._apply_btn.setEnabled(bool(self._items))  # 说明：无重复项时禁用按钮
-        btn_layout.addWidget(self._apply_btn)  # 说明：加入布局
-        self._close_btn = QPushButton("关闭")  # 说明：关闭按钮
-        self._close_btn.clicked.connect(self.close)  # 说明：绑定关闭
-        btn_layout.addWidget(self._close_btn)  # 说明：加入布局
-        layout.addLayout(btn_layout)  # 说明：加入主布局
-
-    def _render_items(self) -> None:  # 说明：渲染重复项
-        self._table.setRowCount(0)  # 说明：清空表格
-        self._row_items = []  # 说明：重置映射
-        for item in self._items:  # 说明：遍历重复项
-            row = self._table.rowCount()  # 说明：获取当前行号
-            self._table.insertRow(row)  # 说明：插入新行
-            checkbox = QCheckBox()  # 说明：复选框
-            checkbox.setChecked(False)  # 说明：默认不选中
-            self._table.setCellWidget(row, 0, checkbox)  # 说明：放入表格
-            self._table.setItem(row, 1, QTableWidgetItem(str(item.line_no)))  # 说明：行号
-            self._table.setItem(row, 2, QTableWidgetItem(str(item.note_id)))  # 说明：笔记 ID
-            preview = _preview_text(item.fields)  # 说明：字段预览
-            self._table.setItem(row, 3, QTableWidgetItem(preview))  # 说明：预览列
-            self._table.setItem(row, 4, QTableWidgetItem(item.deck_name))  # 说明：牌堆列
-            self._table.setItem(row, 5, QTableWidgetItem(item.note_type))  # 说明：题型列
-            self._row_items.append(item)  # 说明：记录映射
-
-    def _apply_updates(self) -> None:  # 说明：把选中的重复项改为更新
-        selected_items = []  # 说明：初始化选中列表
-        for row in range(self._table.rowCount()):  # 说明：遍历所有行
-            widget = self._table.cellWidget(row, 0)  # 说明：获取复选框
-            if isinstance(widget, QCheckBox) and widget.isChecked():  # 说明：判断是否选中
-                selected_items.append(self._row_items[row])  # 说明：加入选中项
-        if not selected_items:  # 说明：未选择任何项
-            showInfo("请先选择需要更新的重复项")  # 说明：提示用户
-            return  # 说明：结束处理
-        new_session_items: List[ImportSessionItem] = []  # 说明：记录手动更新的会话条目
-        updated_count = 0  # 说明：统计更新数量
-        for item in selected_items:  # 说明：逐条更新
-            note = mw.col.get_note(item.note_id)  # 说明：读取笔记对象
-            if note is None:  # 说明：笔记不存在
-                continue  # 说明：跳过该条
-            old_fields = list(note.fields)  # 说明：保存旧字段
-            old_tags = list(note.tags)  # 说明：保存旧标签
-            update_note_fields_and_tags(mw, item.note_id, item.fields, item.tags)  # 说明：执行更新
-            new_session_items.append(  # 说明：记录会话条目
-                ImportSessionItem(
-                    line_no=item.line_no,  # 说明：原始行号
-                    action="manual_update",  # 说明：动作类型
-                    note_id=item.note_id,  # 说明：更新的笔记 ID
-                    deck_name=item.deck_name,  # 说明：牌堆名称
-                    note_type=item.note_type,  # 说明：题型名称
-                    fields=item.fields,  # 说明：导入字段
-                    tags=item.tags,  # 说明：导入标签
-                    old_fields=old_fields,  # 说明：旧字段快照
-                    old_tags=old_tags,  # 说明：旧标签快照
-                    duplicate_note_ids=item.duplicate_note_ids,  # 说明：重复列表
-                )
-            )
-            updated_count += 1  # 说明：累计数量
-        append_session_items(self._session_id, new_session_items)  # 说明：写入会话记录
-        showInfo(f"已更新 {updated_count} 条重复项")  # 说明：提示用户
-
     def _maybe_open_browser_after_import(self, result) -> None:  # 说明：按配置打开浏览器
         if not self._open_browser_after_import.isChecked():  # 说明：未启用自动打开
             return  # 说明：直接返回
@@ -357,6 +274,92 @@ class DuplicateReviewDialog(QDialog):  # 说明：重复处理对话框
         showInfo(message)  # 说明：提示结果
         if result.errors:  # 说明：存在错误
             showText("\n".join(result.errors))  # 说明：展示错误详情
+
+
+class DuplicateReviewDialog(QDialog):  # 说明：重复处理对话框
+    """用于把“跳过的重复项”改为更新，支持批量选择。"""  # 说明：类说明
+
+    def __init__(self, session_id: str, parent=None) -> None:  # 说明：初始化
+        super().__init__(parent)  # 说明：调用父类初始化
+        self._session_id = session_id  # 说明：保存会话 ID
+        self._session = load_import_session(session_id)  # 说明：读取会话记录
+        self._items = [item for item in self._session.items if item.action == "skipped"]  # 说明：筛选跳过项
+        self._row_items: List[ImportSessionItem] = []  # 说明：表格行与条目映射
+        self._build_ui()  # 说明：构建界面
+
+    def _build_ui(self) -> None:  # 说明：构建界面
+        self.setWindowTitle("处理重复项（改策略）")  # 说明：设置窗口标题
+        layout = QVBoxLayout()  # 说明：主布局
+        self.setLayout(layout)  # 说明：应用布局
+        self._table = QTableWidget(0, 6)  # 说明：初始化表格
+        self._table.setHorizontalHeaderLabels(["选择", "行号", "笔记ID", "字段预览", "牌堆", "题型"])  # 说明：设置表头
+        layout.addWidget(self._table)  # 说明：加入主布局
+        self._render_items()  # 说明：渲染重复项
+        btn_layout = QHBoxLayout()  # 说明：按钮布局
+        self._apply_btn = QPushButton("应用更新")  # 说明：应用按钮
+        self._apply_btn.clicked.connect(self._apply_updates)  # 说明：绑定事件
+        self._apply_btn.setEnabled(bool(self._items))  # 说明：无重复项时禁用按钮
+        btn_layout.addWidget(self._apply_btn)  # 说明：加入布局
+        self._close_btn = QPushButton("关闭")  # 说明：关闭按钮
+        self._close_btn.clicked.connect(self.close)  # 说明：绑定关闭
+        btn_layout.addWidget(self._close_btn)  # 说明：加入布局
+        layout.addLayout(btn_layout)  # 说明：加入主布局
+
+    def _render_items(self) -> None:  # 说明：渲染重复项
+        self._table.setRowCount(0)  # 说明：清空表格
+        self._row_items = []  # 说明：重置映射
+        for item in self._items:  # 说明：遍历重复项
+            row = self._table.rowCount()  # 说明：获取当前行号
+            self._table.insertRow(row)  # 说明：插入新行
+            checkbox = QCheckBox()  # 说明：复选框
+            checkbox.setChecked(False)  # 说明：默认不选中
+            self._table.setCellWidget(row, 0, checkbox)  # 说明：放入表格
+            self._table.setItem(row, 1, QTableWidgetItem(str(item.line_no)))  # 说明：行号
+            self._table.setItem(row, 2, QTableWidgetItem(str(item.note_id)))  # 说明：笔记 ID
+            preview = _preview_text(item.fields)  # 说明：字段预览
+            self._table.setItem(row, 3, QTableWidgetItem(preview))  # 说明：预览列
+            self._table.setItem(row, 4, QTableWidgetItem(item.deck_name))  # 说明：牌堆列
+            self._table.setItem(row, 5, QTableWidgetItem(item.note_type))  # 说明：题型列
+            self._row_items.append(item)  # 说明：记录映射
+
+    def _apply_updates(self) -> None:  # 说明：把选中的重复项改为更新
+        if mw is None or mw.col is None:  # 说明：安全检查，避免 Anki 环境异常
+            showInfo("当前无法访问 Anki 集合，请稍后再试")  # 说明：提示用户
+            return  # 说明：终止处理
+        selected_items = []  # 说明：初始化选中列表
+        for row in range(self._table.rowCount()):  # 说明：遍历所有行
+            widget = self._table.cellWidget(row, 0)  # 说明：获取复选框
+            if isinstance(widget, QCheckBox) and widget.isChecked():  # 说明：判断是否选中
+                selected_items.append(self._row_items[row])  # 说明：加入选中项
+        if not selected_items:  # 说明：未选择任何项
+            showInfo("请先选择需要更新的重复项")  # 说明：提示用户
+            return  # 说明：结束处理
+        new_session_items: List[ImportSessionItem] = []  # 说明：记录手动更新的会话条目
+        updated_count = 0  # 说明：统计更新数量
+        for item in selected_items:  # 说明：逐条更新
+            note = mw.col.get_note(item.note_id)  # 说明：读取笔记对象
+            if note is None:  # 说明：笔记不存在
+                continue  # 说明：跳过该条
+            old_fields = list(note.fields)  # 说明：保存旧字段
+            old_tags = list(note.tags)  # 说明：保存旧标签
+            update_note_fields_and_tags(mw, item.note_id, item.fields, item.tags)  # 说明：执行更新
+            new_session_items.append(  # 说明：记录会话条目
+                ImportSessionItem(
+                    line_no=item.line_no,  # 说明：原始行号
+                    action="manual_update",  # 说明：动作类型
+                    note_id=item.note_id,  # 说明：更新的笔记 ID
+                    deck_name=item.deck_name,  # 说明：牌堆名称
+                    note_type=item.note_type,  # 说明：题型名称
+                    fields=item.fields,  # 说明：导入字段
+                    tags=item.tags,  # 说明：导入标签
+                    old_fields=old_fields,  # 说明：旧字段快照
+                    old_tags=old_tags,  # 说明：旧标签快照
+                    duplicate_note_ids=item.duplicate_note_ids,  # 说明：重复列表
+                )
+            )
+            updated_count += 1  # 说明：累计数量
+        append_session_items(self._session_id, new_session_items)  # 说明：写入会话记录
+        showInfo(f"已更新 {updated_count} 条重复项")  # 说明：提示用户
 
 
 class TtsTab(QWidget):  # 说明：TTS 页面
@@ -435,7 +438,7 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         layout.addWidget(self._limit_decks)  # 说明：加入主布局
         deck_layout = QHBoxLayout()  # 说明：牌组选择布局
         self._deck_list = QListWidget()  # 说明：牌组列表
-        self._deck_list.setSelectionMode(QAbstractItemView.MultiSelection)  # 说明：允许多选
+        self._deck_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)  # 说明：允许多选
         self._deck_list.itemSelectionChanged.connect(self._on_deck_selection_changed)  # 说明：保存选择
         deck_layout.addWidget(self._deck_list)  # 说明：加入布局
         self._refresh_decks_btn = QPushButton("刷新牌组")  # 说明：刷新牌组按钮
@@ -512,6 +515,8 @@ class TtsTab(QWidget):  # 说明：TTS 页面
             self._deck_list.addItem(name)  # 说明：写入列表项
         for row in range(self._deck_list.count()):  # 说明：遍历列表行
             item = self._deck_list.item(row)  # 说明：获取列表项
+            if item is None:  # 说明：防御性判断
+                continue  # 说明：跳过空项
             if item.text() in selected:  # 说明：是否为已选牌组
                 item.setSelected(True)  # 说明：设置为选中
         self._deck_list.blockSignals(False)  # 说明：恢复信号
