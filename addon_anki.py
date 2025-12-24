@@ -105,6 +105,27 @@ def build_note_id_query(note_ids: List[int]) -> str:  # 说明：根据笔记 ID
     return " or ".join(parts)  # 说明：用 OR 连接为搜索语句
 
 
+def _set_browser_search_text(browser, query: str) -> None:  # 说明：兼容不同搜索框组件
+    if browser is None:  # 说明：浏览器为空
+        return  # 说明：直接返回
+    if not hasattr(browser, "form"):  # 说明：无表单对象
+        return  # 说明：直接返回
+    search_widget = getattr(browser.form, "searchEdit", None)  # 说明：获取搜索控件
+    if search_widget is None:  # 说明：控件不存在
+        return  # 说明：直接返回
+    if hasattr(search_widget, "setText"):  # 说明：QLineEdit 等支持 setText
+        search_widget.setText(query)  # 说明：写入搜索文本
+        return  # 说明：结束处理
+    if hasattr(search_widget, "setCurrentText"):  # 说明：QComboBox 使用 setCurrentText
+        search_widget.setCurrentText(query)  # 说明：写入搜索文本
+        return  # 说明：结束处理
+    if hasattr(search_widget, "lineEdit") and callable(search_widget.lineEdit):  # 说明：可访问 lineEdit
+        line_edit = search_widget.lineEdit()  # 说明：获取内置输入框
+        if line_edit is not None and hasattr(line_edit, "setText"):  # 说明：支持 setText
+            line_edit.setText(query)  # 说明：写入搜索文本
+            return  # 说明：结束处理
+
+
 def open_browser_with_query(mw, query: str) -> None:  # 说明：打开 Anki 浏览器并执行搜索
     if mw is None:  # 说明：主窗口为空
         return  # 说明：无法打开浏览器
@@ -125,14 +146,14 @@ def _run_browser_search(browser, query: str) -> None:  # 说明：兼容不同�
             return  # 说明：结束处理
         except TypeError:  # 说明：search 无参数版本
             if hasattr(browser, "form") and hasattr(browser.form, "searchEdit"):  # 说明：搜索框存在
-                browser.form.searchEdit.setText(query)  # 说明：写入搜索文本
+                _set_browser_search_text(browser, query)  # 说明：写入搜索文本
                 browser.search()  # 说明：触发无参搜索
                 return  # 说明：结束处理
     if hasattr(browser, "search_for"):  # 说明：旧版本 search_for 接口
         browser.search_for(query)  # 说明：执行搜索
         return  # 说明：结束处理
     if hasattr(browser, "form") and hasattr(browser.form, "searchEdit"):  # 说明：兜底使用搜索框
-        browser.form.searchEdit.setText(query)  # 说明：写入搜索文本
+        _set_browser_search_text(browser, query)  # 说明：写入搜索文本
         if hasattr(browser, "onSearchActivated"):  # 说明：触发搜索
             browser.onSearchActivated()  # 说明：执行搜索动作
 
