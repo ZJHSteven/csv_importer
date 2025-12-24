@@ -30,3 +30,5 @@
 - 更新 addon_tts.py：完善默认音色判断与字段名获取。
 
 - 更新 addon_anki.py：章节标签取牌堆最后一级。
+
+- 更新 addon_parser.py：支持题型行后紧跟内容。

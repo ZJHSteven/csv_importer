@@ -56,6 +56,7 @@ def parse_lines(lines: Iterable[str], config: dict) -> ParseResult:  # 说明：
         type_match = type_pattern.match(line)  # 说明：尝试匹配题型行
         if type_match:  # 说明：匹配成功
             type_name = type_match.group("name").strip()  # 说明：提取题型名称
+            rest_text = type_match.group("rest").strip()  # 说明：提取冒号后的内容
             if not type_name:  # 说明：题型名为空
                 result.warnings.append(ParseWarning("题型行缺少名称", index))  # 说明：记录警告
                 current_type = ""  # 说明：清空当前题型
@@ -71,6 +72,10 @@ def parse_lines(lines: Iterable[str], config: dict) -> ParseResult:  # 说明：
                 start_line_no=index,  # 说明：记录起始行号
             )
             result.sections.append(current_section)  # 说明：加入解析结果
+            if rest_text:  # 说明：题型行后面直接跟了内容
+                fields = _parse_csv_line(rest_text, index, result)  # 说明：解析紧随内容
+                if fields is not None:  # 说明：解析成功
+                    current_section.rows.append(ParsedRow(fields=fields, line_no=index))  # 说明：追加同一行内容
             continue  # 说明：进入下一行
         if not current_deck or not current_type or current_section is None:  # 说明：CSV 行缺少上下文
             result.warnings.append(ParseWarning("CSV 行缺少牌堆或题型上下文", index))  # 说明：记录警告
@@ -84,9 +89,9 @@ def parse_lines(lines: Iterable[str], config: dict) -> ParseResult:  # 说明：
 
 def _build_type_pattern(allow_english_colon: bool) -> re.Pattern:  # 说明：构建题型匹配正则
     if allow_english_colon:  # 说明：允许英文冒号
-        pattern = r"^(?P<name>.+?)[：:]\s*$"  # 说明：中文或英文冒号结尾
+        pattern = r"^(?P<name>.+?)[：:](?P<rest>.*)$"  # 说明：允许冒号后带内容
     else:  # 说明：仅允许中文冒号
-        pattern = r"^(?P<name>.+?)[：]\s*$"  # 说明：仅中文冒号结尾
+        pattern = r"^(?P<name>.+?)[：](?P<rest>.*)$"  # 说明：允许冒号后带内容
     return re.compile(pattern)  # 说明：编译正则并返回
 
 
