@@ -9,12 +9,14 @@ import hashlib  # 说明：用于生成稳定文件名
 import json  # 说明：用于自定义请求体处理
 import urllib.request  # 说明：使用标准库发起 HTTP 请求
 from typing import Any, Dict, List, Optional  # 说明：类型标注所需
+from urllib.parse import urlparse  # 说明：解析 URL 以做基础校验
 
 from .addon_errors import TtsError, logger  # 说明：统一异常与日志
 from .addon_models import TtsResult, TtsTask  # 说明：TTS 数据结构
 
 
 def azure_list_voices(azure_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:  # 说明：拉取 Azure 音色列表
+    _ensure_azure_required_fields(azure_cfg)  # 说明：检查必填参数
     url = _build_url(azure_cfg.get("base_url", ""), azure_cfg.get("endpoints", {}).get("voices_list", ""))  # 说明：构建接口 URL
     headers = _render_headers(azure_cfg.get("headers", {}).get("voices_list", {}), azure_cfg)  # 说明：渲染请求头
     data = _http_request(url, "GET", headers=headers, data=None, timeout=azure_cfg.get("timeout_seconds", 20))  # 说明：发送请求
@@ -30,6 +32,7 @@ def azure_synthesize(  # 说明：Azure 合成入口
     voice_name: str,  # 说明：音色名称
     variables: Optional[Dict[str, Any]] = None,  # 说明：额外模板变量
 ) -> bytes:  # 说明：返回音频二进制
+    _ensure_azure_required_fields(azure_cfg)  # 说明：检查必填参数
     url = _build_url(azure_cfg.get("base_url", ""), azure_cfg.get("endpoints", {}).get("synthesize", ""))  # 说明：构建接口 URL
     headers = _render_headers(azure_cfg.get("headers", {}).get("synthesize", {}), azure_cfg)  # 说明：渲染请求头
     template = str(azure_cfg.get("ssml_template", ""))  # 说明：读取 SSML 模板
@@ -60,6 +63,10 @@ def ensure_audio_for_tasks(mw, tasks: List[TtsTask], config: Dict[str, Any]) -> 
     azure_cfg = config.get("azure", {})  # 说明：读取 Azure 配置
     for task in tasks:  # 说明：逐任务执行
         try:  # 说明：单条失败不影响整体
+            note = mw.col.get_note(task.note_id)  # 说明：读取笔记对象
+            if _field_has_audio_marker(note, task.target_field):  # 说明：已有音频标记则跳过
+                result.skipped += 1  # 说明：统计跳过
+                continue  # 说明：跳过该任务
             filename = build_audio_filename(task.text, task.voice_name)  # 说明：生成稳定文件名
             if mw.col.media.have(filename):  # 说明：媒体已存在
                 result.skipped += 1  # 说明：统计跳过
@@ -69,8 +76,9 @@ def ensure_audio_for_tasks(mw, tasks: List[TtsTask], config: Dict[str, Any]) -> 
             _append_audio_marker(mw, task.note_id, task.target_field, filename, config)  # 说明：写入音频标记
             result.generated += 1  # 说明：统计生成
         except Exception as exc:  # 说明：捕获异常
-            logger.error(f"TTS 失败: {exc}")  # 说明：记录日志
-            result.errors.append(str(exc))  # 说明：记录错误
+            error_text = _format_tts_error(task, exc)  # 说明：格式化错误信息
+            logger.error(f"TTS 失败: {error_text}")  # 说明：记录日志
+            result.errors.append(error_text)  # 说明：记录错误
     return result  # 说明：返回结果
 
 
@@ -124,6 +132,7 @@ def _build_url(base_url: str, path_or_url: str) -> str:  # 说明：拼接 URL
         return path_or_url  # 说明：直接返回
     if not base_url:  # 说明：缺少基础 URL
         raise TtsError("base_url 不能为空")  # 说明：抛出异常
+    _ensure_http_url(base_url, "base_url")  # 说明：校验基础 URL 格式
     return base_url.rstrip("/") + "/" + path_or_url.lstrip("/")  # 说明：拼接并返回
 
 
@@ -150,3 +159,31 @@ def _http_request(url: str, method: str, headers: Dict[str, str], data: Optional
             return resp.read()  # 说明：读取响应内容
     except Exception as exc:  # 说明：捕获异常
         raise TtsError(f"HTTP 请求失败: {exc}")  # 说明：抛出统一异常
+
+
+def _ensure_http_url(value: str, field_name: str) -> None:  # 说明：检查 URL 是否包含协议
+    parsed = urlparse(value)  # 说明：解析 URL
+    if parsed.scheme not in ("http", "https"):  # 说明：未包含协议
+        raise TtsError(f"{field_name} 必须以 http:// 或 https:// 开头")  # 说明：抛出友好错误
+
+
+def _ensure_azure_required_fields(azure_cfg: Dict[str, Any]) -> None:  # 说明：校验 Azure 必填配置
+    base_url = str(azure_cfg.get("base_url", "")).strip()  # 说明：读取 base_url
+    if not base_url:  # 说明：base_url 为空
+        raise TtsError("base_url 不能为空")  # 说明：提示用户填写
+    _ensure_http_url(base_url, "base_url")  # 说明：校验 URL 格式
+    subscription_key = str(azure_cfg.get("subscription_key", "")).strip()  # 说明：读取订阅密钥
+    if not subscription_key:  # 说明：密钥为空
+        raise TtsError("subscription_key 不能为空")  # 说明：提示用户填写
+
+
+def _field_has_audio_marker(note, field_name: str) -> bool:  # 说明：检测字段是否已有音频标记
+    if field_name not in note:  # 说明：字段不存在
+        raise TtsError(f"字段不存在: {field_name}")  # 说明：抛出异常
+    return "[sound:" in note[field_name]  # 说明：简单判断是否已有音频
+
+
+def _format_tts_error(task: TtsTask, exc: Exception) -> str:  # 说明：格式化 TTS 错误详情
+    text = task.text.replace("\n", " ").strip()  # 说明：清理文本中的换行
+    preview = text[:60] + ("..." if len(text) > 60 else "")  # 说明：生成文本预览
+    return f"note_id={task.note_id} 字段={task.target_field} 文本={preview} 错误={exc}"  # 说明：返回详情

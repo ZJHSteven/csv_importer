@@ -338,6 +338,7 @@ class TtsTab(QWidget):  # 说明：TTS 页面
             note_ids = self._get_import_ids()  # 说明：读取最近导入 ID
         else:  # 说明：全库扫描
             note_ids = [int(nid) for nid in mw.col.find_notes(f"tag:{english_tag}")]  # 说明：按标签查找
+        note_ids = _filter_note_ids_by_tag(mw, note_ids, english_tag)  # 说明：按英文标签二次过滤
         self._tasks = build_tts_tasks(mw, note_ids, self._config.get("tts", {}))  # 说明：构建任务
         self._tts_status.setText(f"待生成 {len(self._tasks)} 条")  # 说明：更新状态
 
@@ -352,3 +353,12 @@ class TtsTab(QWidget):  # 说明：TTS 页面
                 showText("\n".join(result.errors))  # 说明：展示错误详情
         except Exception as exc:  # 说明：捕获异常
             showInfo(f"TTS 失败: {exc}")  # 说明：提示错误
+
+
+def _filter_note_ids_by_tag(mw, note_ids: List[int], tag_name: str) -> List[int]:  # 说明：按标签过滤笔记 ID
+    if not tag_name:  # 说明：未设置标签则不做过滤
+        return note_ids  # 说明：直接返回原始列表
+    if mw is None or mw.col is None:  # 说明：集合不可用
+        return note_ids  # 说明：兜底返回原始列表
+    tagged_ids = set(mw.col.find_notes(f'tag:"{tag_name}"'))  # 说明：查询包含指定标签的笔记
+    return [note_id for note_id in note_ids if note_id in tagged_ids]  # 说明：保留交集
