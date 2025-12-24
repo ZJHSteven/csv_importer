@@ -20,3 +20,5 @@
 - 新增 addon_tts.py：实现 Azure TTS 合成与媒体写入。
 
 - 新增 addon_ui.py：实现导入与 TTS 的中文界面。
+
+- 更新 __init__.py：注册菜单入口并打开主界面。
