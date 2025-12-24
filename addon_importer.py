@@ -1,0 +1,163 @@
+# -*- coding: utf-8 -*-  # 说明：显式声明源码编码，避免中文注释读取异常
+"""
+本文件负责把解析结果导入 Anki，包含重复处理、标签补齐、字段校验等逻辑。
+"""  # 说明：文件级说明，强调导入职责
+
+from __future__ import annotations  # 说明：允许前向引用类型标注
+
+from typing import List, Tuple  # 说明：类型标注所需
+
+from addon_anki import (  # 说明：导入 Anki 交互封装
+    add_note_to_deck,  # 说明：添加笔记
+    create_note,  # 说明：创建 Note
+    find_notes,  # 说明：查找笔记
+    get_notetype_by_name,  # 说明：获取笔记类型
+    get_notetype_field_names,  # 说明：获取字段名
+    get_or_create_deck_id,  # 说明：获取或创建牌堆
+    normalize_deck_tag,  # 说明：清理牌堆标签
+    update_note,  # 说明：更新笔记
+)
+from addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
+from addon_models import ImportResult, ParseResult  # 说明：数据结构
+
+
+def import_parse_result(mw, parse_result: ParseResult, config: dict) -> ImportResult:  # 说明：导入入口
+    result = ImportResult()  # 说明：初始化导入结果
+    for section in parse_result.sections:  # 说明：逐分段导入
+        _import_section(mw, section, config, result)  # 说明：导入单个分段
+    return result  # 说明：返回统计结果
+
+
+def _import_section(mw, section, config: dict, result: ImportResult) -> None:  # 说明：导入单个分段
+    note_type_map = config.get("note_type_map", {})  # 说明：读取题型映射
+    mapped_type = note_type_map.get(section.note_type, section.note_type)  # 说明：映射题型到笔记类型
+    deck_id = get_or_create_deck_id(mw, section.deck_name)  # 说明：获取牌堆 ID
+    notetype = get_notetype_by_name(mw, mapped_type)  # 说明：获取笔记类型
+    field_names = get_notetype_field_names(notetype)  # 说明：获取字段名列表
+    field_count = len(field_names)  # 说明：字段数量
+    tags_add_chapter = bool(config.get("tags_add_chapter", True))  # 说明：是否补充章节标签
+    tags_add_note_type = bool(config.get("tags_add_note_type", True))  # 说明：是否补充题型标签
+    tags_splitter = str(config.get("tags_splitter", " "))  # 说明：标签分隔符
+    strip_regex = str(config.get("deck_prefix_strip_regex", r"^\d+[\-_.]+"))  # 说明：牌堆前缀清理正则
+    duplicate_mode = str(config.get("duplicate_mode", "duplicate"))  # 说明：重复处理方式
+    tags_from_extra = bool(config.get("tags_from_extra_column", True))  # 说明：是否从额外列读取标签
+    joiner = str(config.get("field_extra_joiner", "\n"))  # 说明：字段拼接符
+    scope_deck_only = bool(config.get("import_scope_deck_only", True))  # 说明：重复检测范围
+    deck_tag = normalize_deck_tag(section.deck_name, strip_regex)  # 说明：生成章节标签
+    for row in section.rows:  # 说明：逐行导入
+        try:  # 说明：单行错误不影响整体
+            field_values, row_tags = _prepare_fields_and_tags(  # 说明：整理字段与标签
+                row.fields,  # 说明：原始字段列表
+                field_count,  # 说明：目标字段数量
+                tags_from_extra,  # 说明：是否将最后一列当作标签
+                joiner,  # 说明：字段拼接符
+            )
+            all_tags = _merge_tags(  # 说明：合并标签
+                row_tags,  # 说明：行内标签
+                deck_tag if tags_add_chapter else "",  # 说明：章节标签
+                section.note_type if tags_add_note_type else "",  # 说明：题型标签
+                tags_splitter,  # 说明：分隔符
+            )
+            duplicated_ids = _find_duplicates(  # 说明：查找重复笔记
+                mw,  # 说明：主窗口
+                field_names,  # 说明：字段名
+                field_values,  # 说明：字段值
+                mapped_type,  # 说明：笔记类型
+                section.deck_name if scope_deck_only else "",  # 说明：限制牌堆
+            )
+            if duplicated_ids and duplicate_mode == "skip":  # 说明：遇到重复且选择跳过
+                result.skipped += 1  # 说明：统计跳过
+                continue  # 说明：跳过该行
+            if duplicated_ids and duplicate_mode == "update":  # 说明：遇到重复且选择更新
+                _update_existing_note(mw, duplicated_ids[0], field_values, all_tags)  # 说明：更新第一条
+                result.updated += 1  # 说明：统计更新
+                result.imported_note_ids.append(int(duplicated_ids[0]))  # 说明：记录更新的笔记 ID
+                continue  # 说明：更新完成后跳过新增
+            note = create_note(mw, notetype, field_values)  # 说明：创建新笔记
+            note.tags = all_tags  # 说明：写入标签
+            add_note_to_deck(mw, note, deck_id)  # 说明：添加到指定牌堆
+            result.added += 1  # 说明：统计新增
+            if note.id:  # 说明：确保有 ID
+                result.imported_note_ids.append(int(note.id))  # 说明：记录新增的笔记 ID
+        except Exception as exc:  # 说明：捕获单行异常
+            _record_error(result, f"第 {row.line_no} 行导入失败: {exc}")  # 说明：记录错误
+
+
+def _prepare_fields_and_tags(  # 说明：整理字段与标签
+    raw_fields: List[str],  # 说明：原始字段列表
+    field_count: int,  # 说明：目标字段数
+    tags_from_extra: bool,  # 说明：是否从额外列读取标签
+    joiner: str,  # 说明：字段拼接符
+) -> Tuple[List[str], List[str]]:  # 说明：返回字段列表与标签列表
+    fields = list(raw_fields)  # 说明：复制原始字段
+    tags: List[str] = []  # 说明：初始化标签列表
+    if tags_from_extra and len(fields) > field_count:  # 说明：额外列作为标签
+        tag_text = fields[-1]  # 说明：取最后一列作为标签字符串
+        fields = fields[:-1]  # 说明：移除标签列
+        tags = _split_tags(tag_text)  # 说明：解析标签
+    if len(fields) < field_count:  # 说明：字段不足时补空
+        fields = fields + [""] * (field_count - len(fields))  # 说明：补齐空字段
+    if len(fields) > field_count:  # 说明：字段过多时拼接
+        head = fields[:field_count - 1]  # 说明：保留前 n-1 个字段
+        tail = joiner.join(fields[field_count - 1:])  # 说明：合并多余字段
+        fields = head + [tail]  # 说明：拼接成合规字段列表
+    return fields, tags  # 说明：返回整理结果
+
+
+def _split_tags(text: str) -> List[str]:  # 说明：拆分标签字符串
+    if not text:  # 说明：空字符串直接返回空列表
+        return []  # 说明：无标签
+    return [item for item in text.replace("\t", " ").split(" ") if item]  # 说明：按空格拆分并去空
+
+
+def _merge_tags(row_tags: List[str], deck_tag: str, type_tag: str, splitter: str) -> List[str]:  # 说明：合并标签
+    merged = list(row_tags)  # 说明：复制行内标签
+    if deck_tag and deck_tag not in merged:  # 说明：追加章节标签
+        merged.append(deck_tag)  # 说明：加入章节标签
+    if type_tag and type_tag not in merged:  # 说明：追加题型标签
+        merged.append(type_tag)  # 说明：加入题型标签
+    merged = [item.strip() for item in merged if item.strip()]  # 说明：去除空标签
+    return merged  # 说明：返回合并结果
+
+
+def _find_duplicates(  # 说明：查找重复笔记
+    mw,  # 说明：主窗口
+    field_names: List[str],  # 说明：字段名列表
+    field_values: List[str],  # 说明：字段值列表
+    note_type: str,  # 说明：笔记类型
+    deck_name: str,  # 说明：限制牌堆名称（可为空）
+) -> List[int]:  # 说明：返回重复笔记 ID 列表
+    if not field_names or not field_values:  # 说明：字段不足无法查重
+        return []  # 说明：返回空列表
+    key_field = field_names[0]  # 说明：用第一个字段做查重 ключ
+    key_value = field_values[0]  # 说明：用第一个字段的值做查重
+    if not key_value:  # 说明：空值不做查重
+        return []  # 说明：返回空列表
+    query_parts = []  # 说明：构造查询条件
+    query_parts.append(f"note:\"{note_type}\"")  # 说明：限定笔记类型
+    if deck_name:  # 说明：需要限定牌堆
+        query_parts.append(f"deck:\"{deck_name}\"")  # 说明：限定牌堆
+    escaped_value = _escape_search_value(key_value)  # 说明：转义查询文本
+    query_parts.append(f"{key_field}:\"{escaped_value}\"")  # 说明：字段查询条件
+    query = " ".join(query_parts)  # 说明：拼接查询语句
+    return find_notes(mw, query)  # 说明：返回查找结果
+
+
+def _escape_search_value(value: str) -> str:  # 说明：转义搜索字符串
+    return value.replace('"', '\\"')  # 说明：将双引号替换为转义形式
+
+
+def _update_existing_note(mw, note_id: int, field_values: List[str], tags: List[str]) -> None:  # 说明：更新已有笔记
+    note = mw.col.get_note(note_id)  # 说明：获取笔记对象
+    for index, value in enumerate(field_values):  # 说明：逐字段更新
+        if index < len(note.fields):  # 说明：避免越界
+            note.fields[index] = value  # 说明：写入字段
+    for tag in tags:  # 说明：合并标签
+        if tag not in note.tags:  # 说明：避免重复
+            note.tags.append(tag)  # 说明：追加标签
+    update_note(mw, note)  # 说明：保存更新
+
+
+def _record_error(result: ImportResult, message: str) -> None:  # 说明：统一错误记录
+    logger.error(message)  # 说明：记录日志
+    result.errors.append(message)  # 说明：追加错误信息

@@ -14,3 +14,5 @@
 - 新增 addon_parser.py：解析混合格式文本并输出分段结构。
 
 - 新增 addon_anki.py：封装 Anki 集合交互操作。
+
+- 新增 addon_importer.py：实现导入流程与重复处理。
