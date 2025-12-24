@@ -1,5 +1,71 @@
 {
-    "default_delimiter": ",",
-    "auto_detect_notetype": true,
-    "auto_detect_deck": true
+  "config_version": 1,
+  "default_import_path": "",
+  "deck_line_prefix": "//",
+  "type_line_allow_english_colon": true,
+  "allow_html": true,
+  "duplicate_mode": "duplicate",
+  "tags_add_chapter": true,
+  "tags_add_note_type": true,
+  "deck_prefix_strip_regex": "^\\d+[\\-_.]+",
+  "note_type_map": {
+    "问答题": "问答题",
+    "填空题": "填空题",
+    "选择题": "选择题",
+    "默写题": "默写题"
+  },
+  "tags_from_extra_column": true,
+  "tags_splitter": " ",
+  "field_extra_joiner": "\n",
+  "import_scope_deck_only": true,
+  "tts": {
+    "provider": "azure",
+    "english_tag": "英文",
+    "text_field_index": 0,
+    "audio_field_index": 0,
+    "audio_marker_format": " [sound:{filename}]",
+    "auto_append_marker": true,
+    "azure": {
+      "base_url": "",
+      "subscription_key": "",
+      "endpoints": {
+        "voices_list": "/cognitiveservices/voices/list",
+        "synthesize": "/cognitiveservices/v1"
+      },
+      "headers": {
+        "voices_list": {
+          "Ocp-Apim-Subscription-Key": "{subscription_key}",
+          "User-Agent": "anki-csv-importer"
+        },
+        "synthesize": {
+          "Ocp-Apim-Subscription-Key": "{subscription_key}",
+          "Content-Type": "application/ssml+xml",
+          "X-Microsoft-OutputFormat": "audio-24khz-48kbitrate-mono-mp3",
+          "User-Agent": "anki-csv-importer"
+        }
+      },
+      "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\">{text}</voice></speak>",
+      "defaults": {
+        "lang": "en-US"
+      },
+      "timeout_seconds": 20,
+      "voice_cache": {
+        "items": [],
+        "last_update": ""
+      },
+      "filters": {
+        "locale": "en-GB",
+        "gender": "Female",
+        "voice_type": "Neural"
+      },
+      "default_voice": ""
+    },
+    "custom": {
+      "base_url": "",
+      "api_key": "",
+      "headers": {},
+      "payload_template": "",
+      "timeout_seconds": 20
+    }
+  }
 }
