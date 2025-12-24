@@ -36,3 +36,5 @@
 - 更新 addon_importer.py：标签分隔符由配置控制。
 
 - 更新内部模块导入：统一改为相对导入，修复插件加载时模块找不到的问题。
+
+- 修复 Qt6 下 QLineEdit 回显模式设置：改为使用 EchoMode.Password。

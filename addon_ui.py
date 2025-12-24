@@ -197,7 +197,7 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._base_url.textChanged.connect(self._on_base_url_changed)  # 说明：保存修改
         form.addRow("Azure Base URL", self._base_url)  # 说明：添加表单行
         self._subscription_key = QLineEdit(self._config.get("tts", {}).get("azure", {}).get("subscription_key", ""))  # 说明：密钥输入框
-        self._subscription_key.setEchoMode(QLineEdit.Password)  # 说明：隐藏密钥
+        self._subscription_key.setEchoMode(QLineEdit.EchoMode.Password)  # 说明：Qt6 使用枚举类型，避免找不到属性
         self._subscription_key.textChanged.connect(self._on_key_changed)  # 说明：保存修改
         form.addRow("Azure Key", self._subscription_key)  # 说明：添加表单行
         filter_layout = QHBoxLayout()  # 说明：筛选布局
