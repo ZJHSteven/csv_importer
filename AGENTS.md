@@ -28,3 +28,5 @@
 - 新增 config.json：提供默认配置模板。
 
 - 更新 addon_tts.py：完善默认音色判断与字段名获取。
+
+- 更新 addon_anki.py：章节标签取牌堆最后一级。

@@ -71,6 +71,8 @@ def find_notes(mw, query: str) -> List[int]:  # 说明：根据搜索语句查�
 def normalize_deck_tag(deck_name: str, strip_regex: str) -> str:  # 说明：从牌堆名生成标签
     if not deck_name:  # 说明：空值保护
         return ""  # 说明：返回空字符串
+    if "::" in deck_name:  # 说明：分级牌堆时取最后一级作为章节标签
+        deck_name = deck_name.split("::")[-1]  # 说明：截取最后一级名称
     try:  # 说明：捕获正则异常
         cleaned = re.sub(strip_regex, "", deck_name).strip()  # 说明：去掉序号前缀
     except re.error:  # 说明：正则非法
