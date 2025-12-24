@@ -10,3 +10,5 @@
 - 新增 addon_models.py：定义解析/导入/TTS 的数据结构。
 
 - 新增 addon_config.py：集中管理默认配置与读写逻辑。
+
+- 新增 addon_parser.py：解析混合格式文本并输出分段结构。
