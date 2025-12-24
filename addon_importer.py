@@ -50,6 +50,7 @@ def _import_section(mw, section, config: dict, result: ImportResult) -> None:  #
                 row.fields,  # 说明：原始字段列表
                 field_count,  # 说明：目标字段数量
                 tags_from_extra,  # 说明：是否将最后一列当作标签
+                tags_splitter,  # 说明：标签分隔符
                 joiner,  # 说明：字段拼接符
             )
             all_tags = _merge_tags(  # 说明：合并标签
@@ -87,6 +88,7 @@ def _prepare_fields_and_tags(  # 说明：整理字段与标签
     raw_fields: List[str],  # 说明：原始字段列表
     field_count: int,  # 说明：目标字段数
     tags_from_extra: bool,  # 说明：是否从额外列读取标签
+    tags_splitter: str,  # 说明：标签分隔符
     joiner: str,  # 说明：字段拼接符
 ) -> Tuple[List[str], List[str]]:  # 说明：返回字段列表与标签列表
     fields = list(raw_fields)  # 说明：复制原始字段
@@ -94,7 +96,7 @@ def _prepare_fields_and_tags(  # 说明：整理字段与标签
     if tags_from_extra and len(fields) > field_count:  # 说明：额外列作为标签
         tag_text = fields[-1]  # 说明：取最后一列作为标签字符串
         fields = fields[:-1]  # 说明：移除标签列
-        tags = _split_tags(tag_text)  # 说明：解析标签
+        tags = _split_tags(tag_text, tags_splitter)  # 说明：解析标签
     if len(fields) < field_count:  # 说明：字段不足时补空
         fields = fields + [""] * (field_count - len(fields))  # 说明：补齐空字段
     if len(fields) > field_count:  # 说明：字段过多时拼接
@@ -104,10 +106,11 @@ def _prepare_fields_and_tags(  # 说明：整理字段与标签
     return fields, tags  # 说明：返回整理结果
 
 
-def _split_tags(text: str) -> List[str]:  # 说明：拆分标签字符串
+def _split_tags(text: str, splitter: str) -> List[str]:  # 说明：拆分标签字符串
     if not text:  # 说明：空字符串直接返回空列表
         return []  # 说明：无标签
-    return [item for item in text.replace("\t", " ").split(" ") if item]  # 说明：按空格拆分并去空
+    normalized = text.replace("\t", splitter).strip()  # 说明：先归一化分隔符
+    return [item for item in normalized.split(splitter) if item]  # 说明：按配置分隔并去空
 
 
 def _merge_tags(row_tags: List[str], deck_tag: str, type_tag: str, splitter: str) -> List[str]:  # 说明：合并标签

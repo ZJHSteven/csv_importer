@@ -32,3 +32,5 @@
 - 更新 addon_anki.py：章节标签取牌堆最后一级。
 
 - 更新 addon_parser.py：支持题型行后紧跟内容。
+
+- 更新 addon_importer.py：标签分隔符由配置控制。
