@@ -18,3 +18,5 @@
 - 新增 addon_importer.py：实现导入流程与重复处理。
 
 - 新增 addon_tts.py：实现 Azure TTS 合成与媒体写入。
+
+- 新增 addon_ui.py：实现导入与 TTS 的中文界面。
