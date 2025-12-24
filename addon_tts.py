@@ -92,6 +92,8 @@ def build_tts_tasks(mw, note_ids: List[int], config: Dict[str, Any]) -> List[Tts
     text_field_index = int(tts_cfg.get("text_field_index", 0))  # 说明：读取文本字段索引
     audio_field_index = int(tts_cfg.get("audio_field_index", 0))  # 说明：读取音频写入字段索引
     default_voice = str(tts_cfg.get("azure", {}).get("default_voice", ""))  # 说明：读取默认音色
+    if not default_voice:  # 说明：未设置默认音色则不生成任务
+        return tasks  # 说明：直接返回空任务列表
     for note_id in note_ids:  # 说明：逐笔记构建任务
         note = mw.col.get_note(note_id)  # 说明：读取笔记
         if text_field_index >= len(note.fields):  # 说明：索引越界
@@ -99,9 +101,22 @@ def build_tts_tasks(mw, note_ids: List[int], config: Dict[str, Any]) -> List[Tts
         text = note.fields[text_field_index]  # 说明：读取文本内容
         if not text:  # 说明：空文本无需合成
             continue  # 说明：跳过该笔记
-        target_field = note.field_names[audio_field_index] if audio_field_index < len(note.field_names) else note.field_names[0]  # 说明：获取写入字段名
+        field_names = _get_note_field_names(note)  # 说明：获取字段名列表
+        if not field_names:  # 说明：字段名为空无法写入
+            continue  # 说明：跳过该笔记
+        target_field = field_names[audio_field_index] if audio_field_index < len(field_names) else field_names[0]  # 说明：获取写入字段名
         tasks.append(TtsTask(note_id=note_id, text=text, voice_name=default_voice, target_field=target_field))  # 说明：创建任务对象
     return tasks  # 说明：返回任务列表
+
+
+def _get_note_field_names(note) -> List[str]:  # 说明：安全获取字段名列表
+    if hasattr(note, "keys"):  # 说明：优先使用 dict 风格接口
+        return list(note.keys())  # 说明：返回字段名列表
+    if hasattr(note, "model"):  # 说明：尝试从模型读取
+        model = note.model()  # 说明：读取模型
+        if isinstance(model, dict):  # 说明：确保为字典
+            return [field.get("name", "") for field in model.get("flds", [])]  # 说明：提取字段名
+    return []  # 说明：兜底返回空列表
 
 
 def _build_url(base_url: str, path_or_url: str) -> str:  # 说明：拼接 URL
