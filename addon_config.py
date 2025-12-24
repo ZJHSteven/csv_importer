@@ -7,7 +7,7 @@ from __future__ import annotations  # 说明：允许前向引用类型标注
 
 from typing import Any, Dict  # 说明：类型标注所需
 
-from addon_errors import ConfigError  # 说明：引入统一配置异常
+from .addon_errors import ConfigError  # 说明：引入统一配置异常
 
 
 def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置

@@ -10,8 +10,8 @@ import json  # 说明：用于自定义请求体处理
 import urllib.request  # 说明：使用标准库发起 HTTP 请求
 from typing import Any, Dict, List, Optional  # 说明：类型标注所需
 
-from addon_errors import TtsError, logger  # 说明：统一异常与日志
-from addon_models import TtsResult, TtsTask  # 说明：TTS 数据结构
+from .addon_errors import TtsError, logger  # 说明：统一异常与日志
+from .addon_models import TtsResult, TtsTask  # 说明：TTS 数据结构
 
 
 def azure_list_voices(azure_cfg: Dict[str, Any]) -> List[Dict[str, Any]]:  # 说明：拉取 Azure 音色列表

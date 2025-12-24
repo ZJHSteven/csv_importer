@@ -7,7 +7,7 @@ from __future__ import annotations  # 说明：允许前向引用类型标注
 
 from typing import List, Tuple  # 说明：类型标注所需
 
-from addon_anki import (  # 说明：导入 Anki 交互封装
+from .addon_anki import (  # 说明：导入 Anki 交互封装
     add_note_to_deck,  # 说明：添加笔记
     create_note,  # 说明：创建 Note
     find_notes,  # 说明：查找笔记
@@ -17,8 +17,8 @@ from addon_anki import (  # 说明：导入 Anki 交互封装
     normalize_deck_tag,  # 说明：清理牌堆标签
     update_note,  # 说明：更新笔记
 )
-from addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
-from addon_models import ImportResult, ParseResult  # 说明：数据结构
+from .addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
+from .addon_models import ImportResult, ParseResult  # 说明：数据结构
 
 
 def import_parse_result(mw, parse_result: ParseResult, config: dict) -> ImportResult:  # 说明：导入入口

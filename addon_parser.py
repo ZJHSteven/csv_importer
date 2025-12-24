@@ -10,8 +10,8 @@ import re  # 说明：使用正则表达式解析题型行
 from pathlib import Path  # 说明：路径处理
 from typing import Iterable, List  # 说明：类型标注所需
 
-from addon_errors import ParseError  # 说明：统一异常类型
-from addon_models import ParsedRow, ParsedSection, ParseResult, ParseWarning  # 说明：数据结构
+from .addon_errors import ParseError  # 说明：统一异常类型
+from .addon_models import ParsedRow, ParsedSection, ParseResult, ParseWarning  # 说明：数据结构
 
 
 def parse_file(path: str, config: dict) -> ParseResult:  # 说明：从文件路径解析

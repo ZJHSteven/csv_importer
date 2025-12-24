@@ -8,7 +8,7 @@ from __future__ import annotations  # 说明：允许前向引用类型标注
 import re  # 说明：用于清理牌堆名前缀
 from typing import List, Optional  # 说明：类型标注所需
 
-from addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
+from .addon_errors import ImportProcessError, logger  # 说明：统一异常与日志
 
 
 def get_or_create_deck_id(mw, deck_name: str) -> int:  # 说明：获取或创建牌堆

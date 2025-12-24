@@ -27,12 +27,12 @@ from aqt.qt import (  # 说明：Qt 组件
 )
 from aqt.utils import showInfo, showText  # 说明：Anki 提示框
 
-from addon_config import load_config, save_config  # 说明：配置读写
-from addon_importer import import_parse_result  # 说明：导入逻辑
-from addon_parser import parse_file  # 说明：解析逻辑
-from addon_tts import azure_list_voices, build_tts_tasks, ensure_audio_for_tasks  # 说明：TTS 逻辑
-from addon_models import ParseResult  # 说明：数据结构
-from addon_errors import logger  # 说明：日志
+from .addon_config import load_config, save_config  # 说明：配置读写
+from .addon_importer import import_parse_result  # 说明：导入逻辑
+from .addon_parser import parse_file  # 说明：解析逻辑
+from .addon_tts import azure_list_voices, build_tts_tasks, ensure_audio_for_tasks  # 说明：TTS 逻辑
+from .addon_models import ParseResult  # 说明：数据结构
+from .addon_errors import logger  # 说明：日志
 
 
 class MainDialog(QDialog):  # 说明：主对话框

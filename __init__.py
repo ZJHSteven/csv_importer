@@ -8,7 +8,7 @@ from __future__ import annotations  # 说明：允许前向引用类型标注
 from aqt import mw  # 说明：Anki 主窗口
 from aqt.qt import QAction  # 说明：菜单动作
 
-from addon_ui import MainDialog  # 说明：主对话框
+from .addon_ui import MainDialog  # 说明：主对话框
 
 
 def _open_main_dialog() -> None:  # 说明：打开主界面
