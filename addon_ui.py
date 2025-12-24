@@ -121,10 +121,10 @@ class ImportTab(QWidget):  # 说明：导入页面
         self._open_browser_after_import.setChecked(bool(self._config.get("import_auto_open_browser", True)))  # 说明：读取默认值
         self._open_browser_after_import.stateChanged.connect(self._on_open_browser_changed)  # 说明：保存修改
         after_layout.addWidget(self._open_browser_after_import)  # 说明：加入布局
-        self._open_duplicate_browser = QCheckBox("包含重复笔记")  # 说明：是否包含重复笔记
-        self._open_duplicate_browser.setChecked(bool(self._config.get("import_auto_open_duplicate_browser", False)))  # 说明：读取默认值
-        self._open_duplicate_browser.stateChanged.connect(self._on_open_duplicate_browser_changed)  # 说明：保存修改
-        after_layout.addWidget(self._open_duplicate_browser)  # 说明：加入布局
+        self._open_duplicate_browser_checkbox = QCheckBox("包含重复笔记")  # 说明：是否包含重复笔记
+        self._open_duplicate_browser_checkbox.setChecked(bool(self._config.get("import_auto_open_duplicate_browser", False)))  # 说明：读取默认值
+        self._open_duplicate_browser_checkbox.stateChanged.connect(self._on_open_duplicate_browser_changed)  # 说明：保存修改
+        after_layout.addWidget(self._open_duplicate_browser_checkbox)  # 说明：加入布局
         layout.addLayout(after_layout)  # 说明：加入主布局
         action_layout = QHBoxLayout()  # 说明：导入后动作按钮布局
         self._open_import_browser_btn = QPushButton("打开导入结果")  # 说明：打开导入结果
@@ -218,7 +218,7 @@ class ImportTab(QWidget):  # 说明：导入页面
         if not self._open_browser_after_import.isChecked():  # 说明：未启用自动打开
             return  # 说明：直接返回
         note_ids = list(result.imported_note_ids)  # 说明：复制导入 ID 列表
-        if self._open_duplicate_browser.isChecked():  # 说明：包含重复笔记
+        if self._open_duplicate_browser_checkbox.isChecked():  # 说明：包含重复笔记
             note_ids.extend(result.duplicate_note_ids)  # 说明：合并重复 ID
         note_ids = list(dict.fromkeys(note_ids))  # 说明：去重并保持顺序
         open_browser_with_note_ids(mw, note_ids)  # 说明：打开浏览器并定位
@@ -236,7 +236,7 @@ class ImportTab(QWidget):  # 说明：导入页面
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _on_open_duplicate_browser_changed(self, _state: int) -> None:  # 说明：导入后包含重复设置变更
-        self._config["import_auto_open_duplicate_browser"] = self._open_duplicate_browser.isChecked()  # 说明：保存配置
+        self._config["import_auto_open_duplicate_browser"] = self._open_duplicate_browser_checkbox.isChecked()  # 说明：保存配置
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _open_import_browser(self) -> None:  # 说明：打开导入结果浏览器
