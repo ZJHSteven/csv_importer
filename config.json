@@ -44,9 +44,10 @@
           "User-Agent": "anki-csv-importer"
         }
       },
-      "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\">{text}</voice></speak>",
+      "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\"><prosody rate=\"{rate}\">{text}</prosody></voice></speak>",
       "defaults": {
-        "lang": "en-US"
+        "lang": "en-US",
+        "rate": "default"
       },
       "timeout_seconds": 20,
       "voice_cache": {

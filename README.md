@@ -37,4 +37,4 @@
 ## 可配置项（简要）
 - 默认导入路径、重复处理模式（保留重复/覆盖更新/跳过重复）、是否允许 HTML
 - 题型名称与 Anki 笔记类型的映射
-- Azure TTS Base URL、Key、默认音色、SSML 模板
+- Azure TTS Base URL、Key、默认音色、语速、SSML 模板

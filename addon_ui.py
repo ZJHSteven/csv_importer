@@ -222,6 +222,16 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._refresh_btn.clicked.connect(self._refresh_voices)  # 说明：绑定刷新
         voice_layout.addWidget(self._refresh_btn)  # 说明：加入布局
         form.addRow("音色选择", voice_layout)  # 说明：添加表单行
+        self._rate_combo = QComboBox()  # 说明：语速下拉框
+        self._rate_combo.addItem("默认", "default")  # 说明：默认语速
+        self._rate_combo.addItem("稍慢", "slow")  # 说明：稍慢语速
+        self._rate_combo.addItem("很慢", "x-slow")  # 说明：很慢语速
+        self._rate_combo.addItem("稍快", "fast")  # 说明：稍快语速
+        self._rate_combo.addItem("很快", "x-fast")  # 说明：很快语速
+        current_rate = self._config.get("tts", {}).get("azure", {}).get("defaults", {}).get("rate", "default")  # 说明：读取默认语速
+        _select_combo_by_data(self._rate_combo, current_rate)  # 说明：选中当前语速
+        self._rate_combo.currentIndexChanged.connect(self._on_rate_changed)  # 说明：语速变更
+        form.addRow("语速", self._rate_combo)  # 说明：添加表单行
         self._ssml_editor = QTextEdit()  # 说明：SSML 编辑框
         self._ssml_editor.setPlainText(self._config.get("tts", {}).get("azure", {}).get("ssml_template", ""))  # 说明：填充模板
         self._ssml_editor.textChanged.connect(self._on_ssml_changed)  # 说明：保存修改
@@ -259,6 +269,12 @@ class TtsTab(QWidget):  # 说明：TTS 页面
 
     def _on_ssml_changed(self) -> None:  # 说明：SSML 模板变更
         self._config.setdefault("tts", {}).setdefault("azure", {})["ssml_template"] = self._ssml_editor.toPlainText()  # 说明：写入配置
+        save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
+
+    def _on_rate_changed(self, _index: int) -> None:  # 说明：语速变更
+        rate_value = self._rate_combo.currentData() or "default"  # 说明：读取语速值
+        defaults = self._config.setdefault("tts", {}).setdefault("azure", {}).setdefault("defaults", {})  # 说明：读取默认变量
+        defaults["rate"] = rate_value  # 说明：保存语速
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _refresh_voices(self) -> None:  # 说明：拉取音色列表
@@ -327,6 +343,10 @@ class TtsTab(QWidget):  # 说明：TTS 页面
     def _on_voice_selected(self, _value: str) -> None:  # 说明：音色选择变更
         short_name = self._voice_combo.currentData() or ""  # 说明：读取 ShortName
         self._config.setdefault("tts", {}).setdefault("azure", {})["default_voice"] = short_name  # 说明：写入配置
+        locale = _find_voice_locale(self._config, short_name)  # 说明：读取音色 Locale
+        if locale:  # 说明：存在 Locale 时同步到默认语言
+            defaults = self._config.setdefault("tts", {}).setdefault("azure", {}).setdefault("defaults", {})  # 说明：获取默认变量配置
+            defaults["lang"] = locale  # 说明：同步 xml:lang
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _scan_tasks(self) -> None:  # 说明：扫描需要生成的笔记
@@ -375,3 +395,18 @@ def _normalize_duplicate_mode_label(value: str) -> str:  # 说明：将重复模
         "跳过重复": "跳过重复",  # 说明：已是中文
     }  # 说明：映射表结束
     return mapping.get(str(value), "保留重复")  # 说明：未知值回退默认
+
+
+def _select_combo_by_data(combo: QComboBox, value: str) -> None:  # 说明：按 data 选中下拉框
+    for index in range(combo.count()):  # 说明：遍历所有选项
+        if combo.itemData(index) == value:  # 说明：找到匹配值
+            combo.setCurrentIndex(index)  # 说明：设置选中项
+            return  # 说明：命中后直接返回
+
+
+def _find_voice_locale(config: dict, short_name: str) -> str:  # 说明：根据音色 ShortName 查找 Locale
+    voices = config.get("tts", {}).get("azure", {}).get("voice_cache", {}).get("items", [])  # 说明：读取缓存音色
+    for voice in voices:  # 说明：遍历音色列表
+        if voice.get("ShortName") == short_name:  # 说明：匹配 ShortName
+            return str(voice.get("Locale", "")).strip()  # 说明：返回 Locale
+    return ""  # 说明：未找到则返回空字符串

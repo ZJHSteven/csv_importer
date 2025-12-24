@@ -57,9 +57,10 @@ def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置
                         "User-Agent": "anki-csv-importer",  # 说明：简单 UA
                     },
                 },
-                "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\">{text}</voice></speak>",  # 说明：默认 SSML 模板
+                "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\"><prosody rate=\"{rate}\">{text}</prosody></voice></speak>",  # 说明：默认 SSML 模板
                 "defaults": {  # 说明：SSML 默认变量
                     "lang": "en-US",  # 说明：默认语言
+                    "rate": "default",  # 说明：默认语速
                 },
                 "timeout_seconds": 20,  # 说明：请求超时秒数
                 "voice_cache": {  # 说明：本地缓存的音色列表
