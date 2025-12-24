@@ -16,3 +16,5 @@
 - 新增 addon_anki.py：封装 Anki 集合交互操作。
 
 - 新增 addon_importer.py：实现导入流程与重复处理。
+
+- 新增 addon_tts.py：实现 Azure TTS 合成与媒体写入。
