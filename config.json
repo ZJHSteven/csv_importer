@@ -29,6 +29,8 @@
     "audio_marker_format": " [sound:{filename}]",
     "auto_append_marker": true,
     "open_browser_after_run": true,
+    "overwrite_existing_audio": false,
+    "concurrency": 2,
     "scan_limit_decks": false,
     "scan_decks": [],
     "azure": {
@@ -53,7 +55,7 @@
       "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\"><prosody rate=\"{rate}\">{text}</prosody></voice></speak>",
       "defaults": {
         "lang": "en-US",
-        "rate": "default"
+        "rate": "1.0"
       },
       "timeout_seconds": 20,
       "voice_cache": {

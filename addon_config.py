@@ -42,6 +42,8 @@ def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置
             "audio_marker_format": " [sound:{filename}]",  # 说明：音频标记写入格式
             "auto_append_marker": True,  # 说明：是否自动追加音频标记
             "open_browser_after_run": True,  # 说明：TTS 完成后自动打开浏览器
+            "overwrite_existing_audio": False,  # 说明：是否覆盖已生成音频
+            "concurrency": 2,  # 说明：并发合成数量
             "scan_limit_decks": False,  # 说明：扫描时是否限制牌组
             "scan_decks": [],  # 说明：扫描时选中的牌组列表
             "azure": {  # 说明：Azure TTS 配置
@@ -66,7 +68,7 @@ def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置
                 "ssml_template": "<speak version=\"1.0\" xml:lang=\"{lang}\"><voice name=\"{voice_name}\"><prosody rate=\"{rate}\">{text}</prosody></voice></speak>",  # 说明：默认 SSML 模板
                 "defaults": {  # 说明：SSML 默认变量
                     "lang": "en-US",  # 说明：默认语言
-                    "rate": "default",  # 说明：默认语速
+                    "rate": "1.0",  # 说明：默认语速倍率
                 },
                 "timeout_seconds": 20,  # 说明：请求超时秒数
                 "voice_cache": {  # 说明：本地缓存的音色列表

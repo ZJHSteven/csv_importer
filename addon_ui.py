@@ -8,6 +8,7 @@ from __future__ import annotations  # 说明：允许前向引用类型标注
 from typing import List, Optional  # 说明：类型标注所需
 
 from aqt import mw  # 说明：Anki 主窗口对象
+from aqt.operations import QueryOp  # 说明：后台任务封装
 from aqt.qt import (  # 说明：Qt 组件
     QAbstractItemView,  # 说明：视图选择模式
     QCheckBox,  # 说明：复选框
@@ -19,6 +20,7 @@ from aqt.qt import (  # 说明：Qt 组件
     QLabel,  # 说明：文本标签
     QLineEdit,  # 说明：单行输入框
     QPushButton,  # 说明：按钮
+    QSpinBox,  # 说明：数值选择
     QTabWidget,  # 说明：选项卡组件
     QTableWidget,  # 说明：表格控件
     QTableWidgetItem,  # 说明：表格单元格
@@ -36,7 +38,7 @@ from .addon_config import get_default_config, load_config, save_config  # 说明
 from .addon_importer import import_parse_result  # 说明：导入逻辑
 from .addon_parser import parse_file  # 说明：解析逻辑
 from .addon_tts import azure_list_voices, build_tts_tasks, ensure_audio_for_tasks  # 说明：TTS 逻辑
-from .addon_models import ImportSessionItem, ParseResult  # 说明：数据结构
+from .addon_models import ImportSessionItem, ParseResult, TtsResult  # 说明：数据结构
 from .addon_errors import logger  # 说明：日志
 from .addon_session import append_session_items, load_import_session, load_latest_session, rollback_session  # 说明：会话记录能力
 
@@ -414,16 +416,21 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._refresh_btn.clicked.connect(self._refresh_voices)  # 说明：绑定刷新
         voice_layout.addWidget(self._refresh_btn)  # 说明：加入布局
         form.addRow("音色选择", voice_layout)  # 说明：添加表单行
-        self._rate_combo = QComboBox()  # 说明：语速下拉框
-        self._rate_combo.addItem("默认", "default")  # 说明：默认语速
-        self._rate_combo.addItem("稍慢", "slow")  # 说明：稍慢语速
-        self._rate_combo.addItem("很慢", "x-slow")  # 说明：很慢语速
-        self._rate_combo.addItem("稍快", "fast")  # 说明：稍快语速
-        self._rate_combo.addItem("很快", "x-fast")  # 说明：很快语速
-        current_rate = self._config.get("tts", {}).get("azure", {}).get("defaults", {}).get("rate", "default")  # 说明：读取默认语速
-        _select_combo_by_data(self._rate_combo, current_rate)  # 说明：选中当前语速
-        self._rate_combo.currentIndexChanged.connect(self._on_rate_changed)  # 说明：语速变更
-        form.addRow("语速", self._rate_combo)  # 说明：添加表单行
+        self._rate_input = QLineEdit()  # 说明：语速倍率输入框
+        self._rate_input.setPlaceholderText("例如 1.0 / 0.8 / 1.2")  # 说明：输入提示
+        current_rate = str(self._config.get("tts", {}).get("azure", {}).get("defaults", {}).get("rate", "1.0"))  # 说明：读取默认语速
+        self._rate_input.setText(current_rate)  # 说明：设置默认值
+        self._rate_input.textChanged.connect(self._on_rate_changed)  # 说明：语速变更
+        form.addRow("语速倍率", self._rate_input)  # 说明：添加表单行
+        self._concurrency_spin = QSpinBox()  # 说明：并发数量选择
+        self._concurrency_spin.setRange(1, 16)  # 说明：限制并发范围
+        self._concurrency_spin.setValue(int(self._config.get("tts", {}).get("concurrency", 2)))  # 说明：读取默认并发
+        self._concurrency_spin.valueChanged.connect(self._on_concurrency_changed)  # 说明：并发变更
+        form.addRow("并发数量", self._concurrency_spin)  # 说明：添加表单行
+        self._overwrite_audio = QCheckBox("覆盖已生成音频")  # 说明：覆盖开关
+        self._overwrite_audio.setChecked(bool(self._config.get("tts", {}).get("overwrite_existing_audio", False)))  # 说明：读取默认值
+        self._overwrite_audio.stateChanged.connect(self._on_overwrite_changed)  # 说明：保存修改
+        form.addRow("覆盖模式", self._overwrite_audio)  # 说明：添加表单行
         self._ssml_editor = QTextEdit()  # 说明：SSML 编辑框
         self._ssml_editor.setPlainText(self._config.get("tts", {}).get("azure", {}).get("ssml_template", ""))  # 说明：填充模板
         self._ssml_editor.textChanged.connect(self._on_ssml_changed)  # 说明：保存修改
@@ -493,10 +500,32 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._config.setdefault("tts", {}).setdefault("azure", {})["ssml_template"] = template  # 说明：同步到配置
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
-    def _on_rate_changed(self, _index: int) -> None:  # 说明：语速变更
-        rate_value = self._rate_combo.currentData() or "default"  # 说明：读取语速值
+    def _normalize_rate_value(self, raw_text: str) -> str:  # 说明：规范化语速倍率输入
+        text = str(raw_text or "").strip()  # 说明：安全获取文本并去空格
+        if not text:  # 说明：空输入回退默认
+            return "1.0"  # 说明：返回默认倍率
+        try:  # 说明：尝试解析为浮点数
+            float(text)  # 说明：验证可解析
+            return text  # 说明：合法则原样返回
+        except Exception:  # 说明：解析失败
+            return "1.0"  # 说明：回退默认倍率
+
+    def _on_rate_changed(self, value: str) -> None:  # 说明：语速变更
+        normalized = self._normalize_rate_value(value)  # 说明：规范化输入
+        if normalized != value:  # 说明：需要纠正输入
+            self._rate_input.blockSignals(True)  # 说明：暂时阻断信号
+            self._rate_input.setText(normalized)  # 说明：写回规范值
+            self._rate_input.blockSignals(False)  # 说明：恢复信号
         defaults = self._config.setdefault("tts", {}).setdefault("azure", {}).setdefault("defaults", {})  # 说明：读取默认变量
-        defaults["rate"] = rate_value  # 说明：保存语速
+        defaults["rate"] = normalized  # 说明：保存语速
+        save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
+
+    def _on_concurrency_changed(self, value: int) -> None:  # 说明：并发数量变更
+        self._config.setdefault("tts", {})["concurrency"] = int(value)  # 说明：写入配置
+        save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
+
+    def _on_overwrite_changed(self, _state: int) -> None:  # 说明：覆盖开关变更
+        self._config.setdefault("tts", {})["overwrite_existing_audio"] = self._overwrite_audio.isChecked()  # 说明：保存配置
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _on_limit_decks_changed(self, _state: int) -> None:  # 说明：限制牌组开关变更
@@ -661,19 +690,42 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         if not self._tasks:  # 说明：未扫描任务
             showInfo("请先扫描待生成音频")  # 说明：提示用户
             return  # 说明：结束处理
-        try:  # 说明：捕获异常
-            result = ensure_audio_for_tasks(mw, self._tasks, self._config.get("tts", {}))  # 说明：执行生成
+        tasks = list(self._tasks)  # 说明：复制任务，避免异步修改
+        total = len(tasks)  # 说明：记录任务总数
+        self._run_btn.setEnabled(False)  # 说明：执行期间禁用按钮
+        self._scan_btn.setEnabled(False)  # 说明：执行期间禁用扫描
+        self._tts_status.setText(f"后台生成中：0/{total}")  # 说明：更新状态
+
+        def _progress_callback(done: int, total_count: int, status: str) -> None:  # 说明：进度回调
+            def _update_ui() -> None:  # 说明：在主线程更新 UI
+                self._tts_status.setText(f"{status}：{done}/{total_count}")  # 说明：更新状态文本
+                mw.progress.update(label=status, value=done, max=total_count)  # 说明：更新进度条
+            mw.taskman.run_on_main(_update_ui)  # 说明：切回主线程执行
+
+        def _op(col):  # 说明：后台执行的操作
+            try:  # 说明：捕获后台异常
+                return ensure_audio_for_tasks(col, tasks, self._config.get("tts", {}), progress_callback=_progress_callback)  # 说明：执行生成
+            except Exception as exc:  # 说明：捕获异常
+                logger.error(f"TTS 失败: {exc}")  # 说明：记录日志
+                result = TtsResult()  # 说明：构造空结果
+                result.errors.append(str(exc))  # 说明：写入错误信息
+                return result  # 说明：返回错误结果
+
+        def _on_success(result) -> None:  # 说明：后台成功回调
+            self._run_btn.setEnabled(True)  # 说明：恢复按钮
+            self._scan_btn.setEnabled(True)  # 说明：恢复扫描按钮
+            self._tts_status.setText("生成完成")  # 说明：更新状态
             showInfo(  # 说明：提示结果
                 f"TTS 完成：生成 {result.generated} 条，复用 {result.reused} 条，跳过 {result.skipped} 条，错误 {len(result.errors)} 条"
             )
             if result.errors:  # 说明：若有错误
                 showText("\n".join(result.errors))  # 说明：展示错误详情
             if self._open_browser_after_tts.isChecked():  # 说明：需要打开浏览器
-                note_ids = [task.note_id for task in self._tasks]  # 说明：收集任务笔记 ID
+                note_ids = [task.note_id for task in tasks]  # 说明：收集任务笔记 ID
                 note_ids = list(dict.fromkeys(note_ids))  # 说明：去重并保持顺序
                 open_browser_with_note_ids(mw, note_ids)  # 说明：打开浏览器定位
-        except Exception as exc:  # 说明：捕获异常
-            showInfo(f"TTS 失败: {exc}")  # 说明：提示错误
+
+        QueryOp(parent=mw, op=_op, success=_on_success).with_progress().run_in_background()  # 说明：后台运行
 
 
 def _filter_note_ids_by_tag(mw, note_ids: List[int], tag_name: str) -> List[int]:  # 说明：按标签过滤笔记 ID
