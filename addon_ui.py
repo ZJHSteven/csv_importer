@@ -17,15 +17,17 @@ from aqt.qt import (  # 说明：Qt 组件
     QFormLayout,  # 说明：表单布局
     QHBoxLayout,  # 说明：水平布局
     QLabel,  # 说明：文本标签
-    QListWidget,  # 说明：列表控件
     QLineEdit,  # 说明：单行输入框
     QPushButton,  # 说明：按钮
     QTabWidget,  # 说明：选项卡组件
     QTableWidget,  # 说明：表格控件
     QTableWidgetItem,  # 说明：表格单元格
     QTextEdit,  # 说明：多行文本框
+    QTreeWidget,  # 说明：树形控件
+    QTreeWidgetItem,  # 说明：树形节点
     QVBoxLayout,  # 说明：垂直布局
     QWidget,  # 说明：通用容器
+    Qt,  # 说明：Qt 枚举
 )
 from aqt.utils import showInfo, showText  # 说明：Anki 提示框
 
@@ -437,10 +439,11 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._limit_decks.stateChanged.connect(self._on_limit_decks_changed)  # 说明：保存修改
         layout.addWidget(self._limit_decks)  # 说明：加入主布局
         deck_layout = QHBoxLayout()  # 说明：牌组选择布局
-        self._deck_list = QListWidget()  # 说明：牌组列表
-        self._deck_list.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)  # 说明：允许多选
-        self._deck_list.itemSelectionChanged.connect(self._on_deck_selection_changed)  # 说明：保存选择
-        deck_layout.addWidget(self._deck_list)  # 说明：加入布局
+        self._deck_tree = QTreeWidget()  # 说明：树状牌组列表
+        self._deck_tree.setHeaderHidden(True)  # 说明：隐藏表头
+        self._deck_tree.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)  # 说明：允许多选
+        self._deck_tree.itemSelectionChanged.connect(self._on_deck_selection_changed)  # 说明：保存选择
+        deck_layout.addWidget(self._deck_tree)  # 说明：加入布局
         self._refresh_decks_btn = QPushButton("刷新牌组")  # 说明：刷新牌组按钮
         self._refresh_decks_btn.clicked.connect(self._load_deck_list)  # 说明：绑定刷新
         deck_layout.addWidget(self._refresh_decks_btn)  # 说明：加入布局
@@ -502,28 +505,51 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._apply_deck_limit_state()  # 说明：同步控件状态
 
     def _on_deck_selection_changed(self) -> None:  # 说明：牌组选择变更
-        selected = [item.text() for item in self._deck_list.selectedItems()]  # 说明：读取当前选中牌组
+        selected = [  # 说明：读取当前选中牌组
+            str(item.data(0, Qt.ItemDataRole.UserRole) or "")  # 说明：使用保存的完整牌组名
+            for item in self._deck_tree.selectedItems()  # 说明：遍历选中项
+        ]
+        selected = [name for name in selected if name]  # 说明：过滤空值
         self._config.setdefault("tts", {})["scan_decks"] = selected  # 说明：保存到配置
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _load_deck_list(self) -> None:  # 说明：加载牌组列表
         decks = get_all_deck_names(mw)  # 说明：读取所有牌组名称
         selected = set(self._config.get("tts", {}).get("scan_decks", []))  # 说明：读取已选牌组
-        self._deck_list.blockSignals(True)  # 说明：阻断信号避免误触发
-        self._deck_list.clear()  # 说明：清空列表
+        self._deck_tree.blockSignals(True)  # 说明：阻断信号避免误触发
+        self._deck_tree.clear()  # 说明：清空树
+        node_map = {}  # 说明：缓存节点映射，便于复用
         for name in decks:  # 说明：遍历牌组名称
-            self._deck_list.addItem(name)  # 说明：写入列表项
-        for row in range(self._deck_list.count()):  # 说明：遍历列表行
-            item = self._deck_list.item(row)  # 说明：获取列表项
-            if item is None:  # 说明：防御性判断
-                continue  # 说明：跳过空项
-            if item.text() in selected:  # 说明：是否为已选牌组
-                item.setSelected(True)  # 说明：设置为选中
-        self._deck_list.blockSignals(False)  # 说明：恢复信号
+            parts = name.split("::")  # 说明：按层级拆分
+            path = ""  # 说明：当前路径
+            parent_item = None  # 说明：记录父节点
+            for part in parts:  # 说明：逐层构建
+                path = part if not path else f"{path}::{part}"  # 说明：拼接完整路径
+                if path not in node_map:  # 说明：节点不存在时创建
+                    node = QTreeWidgetItem([part])  # 说明：创建节点
+                    node.setData(0, Qt.ItemDataRole.UserRole, path)  # 说明：保存完整牌组名
+                    if parent_item is None:  # 说明：顶层节点
+                        self._deck_tree.addTopLevelItem(node)  # 说明：加入顶层
+                    else:  # 说明：子节点
+                        parent_item.addChild(node)  # 说明：挂到父节点
+                    node_map[path] = node  # 说明：缓存节点
+                parent_item = node_map[path]  # 说明：更新父节点
+        for name in selected:  # 说明：恢复选中状态
+            item = node_map.get(name)  # 说明：查找对应节点
+            if item is None:  # 说明：节点不存在
+                continue  # 说明：跳过
+            item.setSelected(True)  # 说明：设置为选中
+            parent = item.parent()  # 说明：获取父节点
+            while parent is not None:  # 说明：逐级展开
+                parent.setExpanded(True)  # 说明：展开父节点
+                parent = parent.parent()  # 说明：继续向上
+        self._deck_tree.collapseAll()  # 说明：先整体折叠
+        self._deck_tree.expandToDepth(0)  # 说明：展开第一层
+        self._deck_tree.blockSignals(False)  # 说明：恢复信号
 
     def _apply_deck_limit_state(self) -> None:  # 说明：根据开关启用/禁用牌组控件
         enabled = self._limit_decks.isChecked()  # 说明：读取开关状态
-        self._deck_list.setEnabled(enabled)  # 说明：同步列表状态
+        self._deck_tree.setEnabled(enabled)  # 说明：同步树状态
         self._refresh_decks_btn.setEnabled(enabled)  # 说明：同步按钮状态
 
     def _on_open_browser_after_tts_changed(self, _state: int) -> None:  # 说明：TTS 后打开浏览器开关
@@ -605,7 +631,11 @@ class TtsTab(QWidget):  # 说明：TTS 页面
     def _get_selected_decks(self) -> List[str]:  # 说明：获取需要过滤的牌组列表
         if not self._limit_decks.isChecked():  # 说明：未开启牌组限制
             return []  # 说明：返回空列表
-        return [item.text() for item in self._deck_list.selectedItems()]  # 说明：返回选中牌组
+        return [  # 说明：返回选中牌组
+            str(item.data(0, Qt.ItemDataRole.UserRole) or "")  # 说明：读取完整牌组名
+            for item in self._deck_tree.selectedItems()  # 说明：遍历选中项
+            if str(item.data(0, Qt.ItemDataRole.UserRole) or "")  # 说明：过滤空值
+        ]
 
     def _scan_tasks(self) -> None:  # 说明：扫描需要生成的笔记
         english_tag = self._config.get("tts", {}).get("english_tag", "英文")  # 说明：读取英文标签

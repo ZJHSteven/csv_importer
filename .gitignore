@@ -14,3 +14,6 @@ meta.json
 
 # 插件运行时会话与用户数据
 user_files/
+
+# Qt/Chromium 运行时日志
+debug.log
