@@ -6,7 +6,7 @@
 from __future__ import annotations  # 说明：允许前向引用类型标注
 
 from dataclasses import dataclass, field  # 说明：使用 dataclass 简化样板代码
-from typing import List, Optional  # 说明：类型标注所需
+from typing import Dict, List, Optional  # 说明：类型标注所需
 
 
 @dataclass
@@ -86,6 +86,7 @@ class ImportSession:  # 说明：导入会话记录
     source_path: str  # 说明：源文件路径
     duplicate_mode: str  # 说明：导入时的重复处理策略
     items: List[ImportSessionItem] = field(default_factory=list)  # 说明：会话明细列表
+    strategy_overrides: Dict[str, str] = field(default_factory=dict)  # 说明：手动策略覆盖映射（key 为行号）
 
 
 @dataclass
@@ -93,3 +94,10 @@ class RollbackResult:  # 说明：回滚结果统计
     restored: int = 0  # 说明：恢复更新的数量
     deleted: int = 0  # 说明：删除新增的数量
     errors: List[str] = field(default_factory=list)  # 说明：回滚错误信息
+
+
+@dataclass
+class StrategyApplyResult:  # 说明：策略调整结果
+    applied: int = 0  # 说明：成功调整数量
+    skipped: int = 0  # 说明：无需调整数量
+    errors: List[str] = field(default_factory=list)  # 说明：错误详情

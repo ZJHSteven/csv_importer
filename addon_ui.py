@@ -38,9 +38,17 @@ from .addon_config import get_default_config, load_config, save_config  # 说明
 from .addon_importer import import_parse_result  # 说明：导入逻辑
 from .addon_parser import parse_file  # 说明：解析逻辑
 from .addon_tts import azure_list_voices, build_tts_tasks, ensure_audio_for_tasks  # 说明：TTS 逻辑
-from .addon_models import ImportSessionItem, ParseResult, TtsResult  # 说明：数据结构
+from .addon_models import ImportSession, ImportSessionItem, ParseResult, TtsResult  # 说明：数据结构
 from .addon_errors import logger  # 说明：日志
-from .addon_session import append_session_items, load_import_session, load_latest_session, rollback_session  # 说明：会话记录能力
+from .addon_session import (  # 说明：会话记录能力
+    append_session_items,  # 说明：追加会话条目
+    apply_duplicate_strategy,  # 说明：调整重复策略
+    delete_import_session,  # 说明：删除会话
+    list_import_sessions,  # 说明：列出会话
+    load_import_session,  # 说明：读取会话
+    load_latest_session,  # 说明：读取最新会话
+    rollback_session,  # 说明：回滚会话
+)
 
 
 class MainDialog(QDialog):  # 说明：主对话框
@@ -59,12 +67,15 @@ class MainDialog(QDialog):  # 说明：主对话框
         layout.addWidget(self._tabs)  # 说明：加入主布局
         self._import_tab = ImportTab(self._config, self._addon_name, self._on_import_done)  # 说明：创建导入页
         self._tts_tab = TtsTab(self._config, self._addon_name, self._get_last_import_note_ids)  # 说明：创建 TTS 页
+        self._session_tab = SessionTab(self._config, self._addon_name)  # 说明：创建会话页
         self._tabs.addTab(self._import_tab, "导入")  # 说明：添加导入页
         self._tabs.addTab(self._tts_tab, "TTS")  # 说明：添加 TTS 页
+        self._tabs.addTab(self._session_tab, "会话")  # 说明：添加会话页
 
     def _on_import_done(self, note_ids: List[int]) -> None:  # 说明：导入完成回调
         self._last_import_note_ids = note_ids  # 说明：保存最近导入 ID
         self._tts_tab.refresh_import_scope()  # 说明：通知 TTS 页刷新状态
+        self._session_tab.refresh_sessions()  # 说明：刷新会话记录
 
     def _get_last_import_note_ids(self) -> List[int]:  # 说明：供 TTS 页读取最近导入 ID
         return list(self._last_import_note_ids)  # 说明：返回副本，避免外部修改
@@ -728,6 +739,236 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         QueryOp(parent=mw, op=_op, success=_on_success).with_progress().run_in_background()  # 说明：后台运行
 
 
+class SessionTab(QWidget):  # 说明：会话记录页面
+    """展示导入会话记录，并支持调整重复策略。"""  # 说明：类说明
+
+    def __init__(self, config: dict, addon_name: str) -> None:  # 说明：初始化
+        super().__init__()  # 说明：调用父类初始化
+        self._config = config  # 说明：保存配置
+        self._addon_name = addon_name  # 说明：保存插件名称
+        self._sessions: List[ImportSession] = []  # 说明：会话列表缓存
+        self._current_session: Optional[ImportSession] = None  # 说明：当前会话
+        self._build_ui()  # 说明：构建 UI
+        self._load_sessions()  # 说明：加载会话
+
+    def refresh_sessions(self) -> None:  # 说明：对外刷新会话
+        self._load_sessions()  # 说明：重新加载会话
+
+    def _build_ui(self) -> None:  # 说明：搭建界面
+        layout = QVBoxLayout()  # 说明：主布局
+        self.setLayout(layout)  # 说明：应用布局
+        session_actions = QHBoxLayout()  # 说明：会话操作行
+        self._refresh_btn = QPushButton("刷新会话")  # 说明：刷新按钮
+        self._refresh_btn.clicked.connect(self._load_sessions)  # 说明：绑定刷新
+        session_actions.addWidget(self._refresh_btn)  # 说明：加入布局
+        self._delete_btn = QPushButton("删除会话记录")  # 说明：删除按钮
+        self._delete_btn.clicked.connect(self._delete_session)  # 说明：绑定删除
+        session_actions.addWidget(self._delete_btn)  # 说明：加入布局
+        self._rollback_btn = QPushButton("回滚该会话")  # 说明：回滚按钮
+        self._rollback_btn.clicked.connect(self._rollback_session)  # 说明：绑定回滚
+        session_actions.addWidget(self._rollback_btn)  # 说明：加入布局
+        self._open_import_btn = QPushButton("打开导入结果")  # 说明：打开导入按钮
+        self._open_import_btn.clicked.connect(self._open_import_browser)  # 说明：绑定打开
+        session_actions.addWidget(self._open_import_btn)  # 说明：加入布局
+        self._open_duplicate_btn = QPushButton("打开重复笔记")  # 说明：打开重复按钮
+        self._open_duplicate_btn.clicked.connect(self._open_duplicate_browser)  # 说明：绑定打开
+        session_actions.addWidget(self._open_duplicate_btn)  # 说明：加入布局
+        self._keep_limit_label = QLabel("保留会话数量(0=不限)")  # 说明：保留数量提示
+        session_actions.addWidget(self._keep_limit_label)  # 说明：加入布局
+        self._keep_limit_spin = QSpinBox()  # 说明：保留数量设置
+        self._keep_limit_spin.setRange(0, 9999)  # 说明：设置范围
+        self._keep_limit_spin.setValue(int(self._config.get("import_session_keep_limit", 0)))  # 说明：读取默认值
+        self._keep_limit_spin.valueChanged.connect(self._on_keep_limit_changed)  # 说明：绑定变更
+        session_actions.addWidget(self._keep_limit_spin)  # 说明：加入布局
+        layout.addLayout(session_actions)  # 说明：加入主布局
+        self._session_table = QTableWidget(0, 6)  # 说明：会话表格
+        self._session_table.setHorizontalHeaderLabels(["会话ID", "源文件", "新增", "更新", "跳过", "重复"])  # 说明：表头
+        self._session_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)  # 说明：整行选择
+        self._session_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)  # 说明：单选
+        self._session_table.itemSelectionChanged.connect(self._on_session_selected)  # 说明：绑定选择事件
+        layout.addWidget(self._session_table)  # 说明：加入主布局
+        strategy_layout = QHBoxLayout()  # 说明：策略操作行
+        strategy_layout.addWidget(QLabel("选中行改策略为"))  # 说明：提示标签
+        self._strategy_combo = QComboBox()  # 说明：策略下拉框
+        self._strategy_combo.addItems(["保留重复", "覆盖更新", "跳过重复"])  # 说明：策略选项
+        strategy_layout.addWidget(self._strategy_combo)  # 说明：加入布局
+        self._apply_strategy_btn = QPushButton("应用到选中项")  # 说明：应用按钮
+        self._apply_strategy_btn.clicked.connect(self._apply_strategy)  # 说明：绑定应用
+        strategy_layout.addWidget(self._apply_strategy_btn)  # 说明：加入布局
+        layout.addLayout(strategy_layout)  # 说明：加入主布局
+        self._item_table = QTableWidget(0, 7)  # 说明：条目表格
+        self._item_table.setHorizontalHeaderLabels(["行号", "当前策略", "笔记ID", "牌堆", "题型", "重复ID", "字段预览"])  # 说明：表头
+        self._item_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)  # 说明：整行选择
+        self._item_table.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)  # 说明：允许多选
+        layout.addWidget(self._item_table)  # 说明：加入主布局
+        self._update_action_state()  # 说明：初始化按钮状态
+
+    def _on_keep_limit_changed(self, value: int) -> None:  # 说明：保留数量变更
+        self._config["import_session_keep_limit"] = int(value)  # 说明：写入配置
+        save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
+
+    def _load_sessions(self) -> None:  # 说明：加载会话列表
+        self._sessions = list_import_sessions()  # 说明：读取会话
+        self._session_table.setRowCount(0)  # 说明：清空表格
+        for session in self._sessions:  # 说明：逐会话填充
+            row = self._session_table.rowCount()  # 说明：获取行号
+            self._session_table.insertRow(row)  # 说明：插入新行
+            added, updated, skipped, duplicated = self._summarize_session(session)  # 说明：统计数量
+            self._session_table.setItem(row, 0, QTableWidgetItem(session.session_id))  # 说明：会话 ID
+            self._session_table.setItem(row, 1, QTableWidgetItem(session.source_path))  # 说明：源文件
+            self._session_table.setItem(row, 2, QTableWidgetItem(str(added)))  # 说明：新增数量
+            self._session_table.setItem(row, 3, QTableWidgetItem(str(updated)))  # 说明：更新数量
+            self._session_table.setItem(row, 4, QTableWidgetItem(str(skipped)))  # 说明：跳过数量
+            self._session_table.setItem(row, 5, QTableWidgetItem(str(duplicated)))  # 说明：重复数量
+        if self._session_table.rowCount() > 0:  # 说明：自动选择第一行
+            self._session_table.selectRow(0)  # 说明：选中首行
+        else:  # 说明：无会话记录
+            self._current_session = None  # 说明：清空当前会话
+            self._item_table.setRowCount(0)  # 说明：清空条目表格
+        self._update_action_state()  # 说明：更新按钮状态
+
+    def _on_session_selected(self) -> None:  # 说明：会话选择变更
+        self._current_session = self._get_selected_session()  # 说明：读取当前会话
+        self._render_session_items()  # 说明：渲染条目
+        self._update_action_state()  # 说明：更新按钮状态
+
+    def _get_selected_session(self) -> Optional[ImportSession]:  # 说明：获取选中的会话
+        selected = self._session_table.selectedItems()  # 说明：获取选中项
+        if not selected:  # 说明：未选中
+            return None  # 说明：返回空
+        row = selected[0].row()  # 说明：读取行号
+        if row < 0 or row >= len(self._sessions):  # 说明：越界保护
+            return None  # 说明：返回空
+        return self._sessions[row]  # 说明：返回对应会话
+
+    def _summarize_session(self, session: ImportSession) -> tuple:  # 说明：统计会话条目
+        base_items = [item for item in session.items if item.action in ("added", "updated", "skipped")]  # 说明：仅统计基础项
+        added = sum(1 for item in base_items if item.action == "added")  # 说明：统计新增
+        updated = sum(1 for item in base_items if item.action == "updated")  # 说明：统计更新
+        skipped = sum(1 for item in base_items if item.action == "skipped")  # 说明：统计跳过
+        duplicate_ids = set()  # 说明：重复 ID 集合
+        for item in base_items:  # 说明：遍历条目
+            duplicate_ids.update(item.duplicate_note_ids)  # 说明：合并重复 ID
+        return added, updated, skipped, len(duplicate_ids)  # 说明：返回统计值
+
+    def _render_session_items(self) -> None:  # 说明：渲染会话条目
+        self._item_table.setRowCount(0)  # 说明：清空表格
+        if self._current_session is None:  # 说明：无会话
+            return  # 说明：直接返回
+        base_items = [item for item in self._current_session.items if item.action in ("added", "updated", "skipped")]  # 说明：基础条目
+        base_items.sort(key=lambda item: item.line_no)  # 说明：按行号排序
+        for item in base_items:  # 说明：逐条渲染
+            row = self._item_table.rowCount()  # 说明：获取当前行
+            self._item_table.insertRow(row)  # 说明：插入新行
+            strategy_label = self._resolve_strategy_label(self._current_session, item)  # 说明：计算当前策略
+            duplicate_ids = ",".join([str(note_id) for note_id in item.duplicate_note_ids])  # 说明：拼接重复 ID
+            self._item_table.setItem(row, 0, QTableWidgetItem(str(item.line_no)))  # 说明：行号
+            self._item_table.setItem(row, 1, QTableWidgetItem(strategy_label))  # 说明：策略
+            self._item_table.setItem(row, 2, QTableWidgetItem(str(item.note_id)))  # 说明：笔记 ID
+            self._item_table.setItem(row, 3, QTableWidgetItem(item.deck_name))  # 说明：牌堆
+            self._item_table.setItem(row, 4, QTableWidgetItem(item.note_type))  # 说明：题型
+            self._item_table.setItem(row, 5, QTableWidgetItem(duplicate_ids))  # 说明：重复 ID
+            self._item_table.setItem(row, 6, QTableWidgetItem(_preview_text(item.fields)))  # 说明：字段预览
+
+    def _resolve_strategy_label(self, session: ImportSession, item: ImportSessionItem) -> str:  # 说明：解析策略显示
+        override = session.strategy_overrides.get(str(item.line_no), "")  # 说明：读取覆盖策略
+        if override:  # 说明：存在覆盖
+            return self._mode_to_label(override)  # 说明：返回覆盖策略文本
+        return self._action_to_label(item.action)  # 说明：使用原始动作
+
+    def _mode_to_label(self, mode: str) -> str:  # 说明：内部策略转中文
+        mapping = {  # 说明：映射表
+            "duplicate": "保留重复",  # 说明：保留重复
+            "update": "覆盖更新",  # 说明：覆盖更新
+            "skip": "跳过重复",  # 说明：跳过重复
+        }  # 说明：映射表结束
+        return mapping.get(str(mode), "保留重复")  # 说明：未知值回退
+
+    def _action_to_label(self, action: str) -> str:  # 说明：动作转中文
+        mapping = {  # 说明：映射表
+            "added": "保留重复",  # 说明：新增视为重复
+            "updated": "覆盖更新",  # 说明：更新动作
+            "skipped": "跳过重复",  # 说明：跳过动作
+            "manual_update": "覆盖更新",  # 说明：手动更新
+            "manual_duplicate": "保留重复",  # 说明：手动复制
+        }  # 说明：映射表结束
+        return mapping.get(str(action), "保留重复")  # 说明：默认回退
+
+    def _selected_line_numbers(self) -> List[int]:  # 说明：获取选中的行号
+        selected_rows = {item.row() for item in self._item_table.selectedItems()}  # 说明：收集选中行
+        line_numbers = []  # 说明：初始化行号列表
+        for row in sorted(selected_rows):  # 说明：逐行处理
+            item = self._item_table.item(row, 0)  # 说明：读取行号列
+            if item is None:  # 说明：空项保护
+                continue  # 说明：跳过
+            try:  # 说明：捕获转换异常
+                line_numbers.append(int(item.text()))  # 说明：转换为数字
+            except Exception:  # 说明：转换失败
+                continue  # 说明：跳过异常行
+        return line_numbers  # 说明：返回行号列表
+
+    def _apply_strategy(self) -> None:  # 说明：应用策略
+        if self._current_session is None:  # 说明：未选择会话
+            showInfo("请先选择会话记录")  # 说明：提示用户
+            return  # 说明：结束处理
+        line_numbers = self._selected_line_numbers()  # 说明：读取选中行号
+        if not line_numbers:  # 说明：未选择条目
+            showInfo("请先选择需要调整的条目")  # 说明：提示用户
+            return  # 说明：结束处理
+        target_label = self._strategy_combo.currentText()  # 说明：读取目标策略
+        target_mode = {"保留重复": "duplicate", "覆盖更新": "update", "跳过重复": "skip"}.get(target_label, "duplicate")  # 说明：转内部值
+        result = apply_duplicate_strategy(mw, self._current_session.session_id, line_numbers, target_mode)  # 说明：执行调整
+        showInfo(f"调整完成：成功 {result.applied} 条，跳过 {result.skipped} 条，错误 {len(result.errors)} 条")  # 说明：提示结果
+        if result.errors:  # 说明：存在错误
+            showText("\n".join(result.errors))  # 说明：展示错误详情
+        self._current_session = load_import_session(self._current_session.session_id)  # 说明：刷新当前会话
+        self._render_session_items()  # 说明：刷新表格
+
+    def _open_import_browser(self) -> None:  # 说明：打开导入结果浏览器
+        if self._current_session is None:  # 说明：未选择会话
+            showInfo("请先选择会话记录")  # 说明：提示用户
+            return  # 说明：结束处理
+        note_ids = _collect_import_note_ids(self._current_session)  # 说明：收集导入笔记
+        if not note_ids:  # 说明：没有可打开的笔记
+            showInfo("当前会话没有导入结果")  # 说明：提示用户
+            return  # 说明：结束处理
+        open_browser_with_note_ids(mw, note_ids)  # 说明：打开浏览器
+
+    def _open_duplicate_browser(self) -> None:  # 说明：打开重复笔记浏览器
+        if self._current_session is None:  # 说明：未选择会话
+            showInfo("请先选择会话记录")  # 说明：提示用户
+            return  # 说明：结束处理
+        note_ids = _collect_duplicate_note_ids(self._current_session)  # 说明：收集重复笔记
+        if not note_ids:  # 说明：没有重复笔记
+            showInfo("当前会话没有重复笔记")  # 说明：提示用户
+            return  # 说明：结束处理
+        open_browser_with_note_ids(mw, note_ids)  # 说明：打开浏览器
+
+    def _rollback_session(self) -> None:  # 说明：回滚选中会话
+        if self._current_session is None:  # 说明：未选择会话
+            showInfo("请先选择会话记录")  # 说明：提示用户
+            return  # 说明：结束处理
+        result = rollback_session(mw, self._current_session)  # 说明：执行回滚
+        showInfo(f"回滚完成：恢复 {result.restored} 条，删除 {result.deleted} 条，错误 {len(result.errors)} 条")  # 说明：提示结果
+        if result.errors:  # 说明：存在错误
+            showText("\n".join(result.errors))  # 说明：展示错误详情
+
+    def _delete_session(self) -> None:  # 说明：删除会话记录
+        if self._current_session is None:  # 说明：未选择会话
+            showInfo("请先选择会话记录")  # 说明：提示用户
+            return  # 说明：结束处理
+        delete_import_session(self._current_session.session_id)  # 说明：删除会话文件
+        self._load_sessions()  # 说明：刷新列表
+
+    def _update_action_state(self) -> None:  # 说明：更新按钮状态
+        has_session = self._current_session is not None  # 说明：是否有会话
+        self._delete_btn.setEnabled(has_session)  # 说明：删除按钮状态
+        self._rollback_btn.setEnabled(has_session)  # 说明：回滚按钮状态
+        self._open_import_btn.setEnabled(has_session)  # 说明：打开导入按钮状态
+        self._open_duplicate_btn.setEnabled(has_session)  # 说明：打开重复按钮状态
+        self._apply_strategy_btn.setEnabled(has_session)  # 说明：应用策略按钮状态
+
+
 def _filter_note_ids_by_tag(mw, note_ids: List[int], tag_name: str) -> List[int]:  # 说明：按标签过滤笔记 ID
     if not tag_name:  # 说明：未设置标签则不做过滤
         return note_ids  # 说明：直接返回原始列表
@@ -803,7 +1044,7 @@ def _preview_text(fields: List[str], limit: int = 60) -> str:  # 说明：生成
 def _collect_import_note_ids(session) -> List[int]:  # 说明：从会话中收集导入笔记 ID
     ids: List[int] = []  # 说明：初始化列表
     for item in session.items:  # 说明：遍历会话条目
-        if item.action in ("added", "updated", "manual_update"):  # 说明：只收集写入动作
+        if item.action in ("added", "updated", "manual_update", "manual_duplicate"):  # 说明：只收集写入动作
             ids.append(int(item.note_id))  # 说明：追加 ID
     return list(dict.fromkeys(ids))  # 说明：去重并保持顺序
 

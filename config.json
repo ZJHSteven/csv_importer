@@ -5,7 +5,7 @@
   "type_line_allow_english_colon": true,
   "allow_html": true,
   "duplicate_mode": "保留重复",
-  "import_session_keep_limit": 20,
+  "import_session_keep_limit": 0,
   "import_auto_open_browser": true,
   "import_auto_open_duplicate_browser": false,
   "tags_add_chapter": true,

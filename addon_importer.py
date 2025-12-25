@@ -154,6 +154,12 @@ def _import_section(mw, section, config: dict, result: ImportResult, session: Im
                 result.added_note_ids.append(note_id)  # 说明：记录新增 ID
                 if duplicated_ids:  # 说明：存在重复记录
                     result.duplicate_note_ids.extend([int(note_id) for note_id in duplicated_ids])  # 说明：记录重复 ID
+                old_fields = []  # 说明：初始化旧字段快照
+                old_tags = []  # 说明：初始化旧标签快照
+                if duplicated_ids:  # 说明：保留重复时也要保存旧笔记快照
+                    primary_id = int(duplicated_ids[0])  # 说明：取第一条重复作为主笔记
+                    old_fields = _snapshot_note_fields(mw, primary_id)  # 说明：保存原字段快照
+                    old_tags = _snapshot_note_tags(mw, primary_id)  # 说明：保存原标签快照
                 session.items.append(  # 说明：写入会话记录
                     ImportSessionItem(
                         line_no=row.line_no,  # 说明：源行号
@@ -163,6 +169,8 @@ def _import_section(mw, section, config: dict, result: ImportResult, session: Im
                         note_type=section.note_type,  # 说明：题型名称
                         fields=field_values,  # 说明：导入字段
                         tags=all_tags,  # 说明：导入标签
+                        old_fields=old_fields,  # 说明：保存旧字段快照
+                        old_tags=old_tags,  # 说明：保存旧标签快照
                         duplicate_note_ids=[int(note_id) for note_id in duplicated_ids],  # 说明：重复笔记列表
                     )
                 )

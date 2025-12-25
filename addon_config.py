@@ -18,7 +18,7 @@ def get_default_config() -> Dict[str, Any]:  # 说明：提供默认配置
         "type_line_allow_english_colon": True,  # 说明：题型行允许英文冒号
         "allow_html": True,  # 说明：默认允许 HTML
         "duplicate_mode": "保留重复",  # 说明：默认重复处理方式（保留重复/覆盖更新/跳过重复）
-        "import_session_keep_limit": 20,  # 说明：保留的导入会话数量上限
+        "import_session_keep_limit": 0,  # 说明：保留的导入会话数量上限（0=不限）
         "import_auto_open_browser": True,  # 说明：导入后自动打开浏览器
         "import_auto_open_duplicate_browser": False,  # 说明：导入后是否打开重复笔记浏览器
         "tags_add_chapter": True,  # 说明：自动补充章节标签
