@@ -192,7 +192,7 @@ def _remove_tts_markers(note, field_name: str) -> None:  # 说明：移除字段
     if not text:  # 说明：空内容无需处理
         return  # 说明：直接返回
     pattern = rf"\s*\[sound:{TTS_MEDIA_PREFIX}[^\]]+\]"  # 说明：匹配插件音频标记
-    cleaned = re.sub(pattern, \"\", text)  # 说明：移除标记
+    cleaned = re.sub(pattern, "", text)  # 说明：移除标记
     if cleaned != text:  # 说明：内容发生变化
         note[field_name] = cleaned  # 说明：写回清理后的内容
 

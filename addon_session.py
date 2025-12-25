@@ -9,7 +9,7 @@ import json  # 说明：用于读写会话 JSON
 from dataclasses import asdict  # 说明：将 dataclass 转为 dict
 from datetime import datetime  # 说明：生成时间戳
 from pathlib import Path  # 说明：路径处理
-from typing import Dict, List, Optional  # 说明：类型标注所需
+from typing import Dict, List, Optional, cast  # 说明：类型标注所需
 
 from .addon_errors import SessionError, logger  # 说明：统一异常与日志
 from .addon_anki import (  # 说明：导入 Anki 交互封装
@@ -109,7 +109,7 @@ def apply_duplicate_strategy(  # 说明：对指定行应用重复策略
     result = StrategyApplyResult()  # 说明：初始化结果
     if mw is None or mw.col is None:  # 说明：集合不可用
         result.errors.append("集合未加载，无法调整策略")  # 说明：记录错误
-        return result  # 说明：直接返回
+        return cast(StrategyApplyResult, result)  # 说明：直接返回并显式标注类型
     session = load_import_session(session_id)  # 说明：读取会话记录
     base_items = _collect_base_items(session)  # 说明：收集基础条目
     normalized_mode = _normalize_strategy_mode(target_mode)  # 说明：规范化目标策略
@@ -132,7 +132,7 @@ def apply_duplicate_strategy(  # 说明：对指定行应用重复策略
         except Exception as exc:  # 说明：捕获异常
             result.errors.append(f"行号 {line_no} 调整失败: {exc}")  # 说明：记录错误
     save_import_session(session, keep_limit=0)  # 说明：保存会话并避免清理
-    return result  # 说明：返回处理结果
+    return cast(StrategyApplyResult, result)  # 说明：返回处理结果并显式标注类型
 
 
 def _normalize_strategy_mode(value: str) -> str:  # 说明：规范化策略值
@@ -271,7 +271,9 @@ def _create_duplicate_note(mw, session: ImportSession, item: ImportSessionItem) 
     if not note.id:  # 说明：未生成 ID
         raise SessionError("创建副本笔记失败，未获得笔记 ID")  # 说明：抛出异常
     session.items.append(  # 说明：记录手动复制动作
-        ImportSessionItem(
+        cast(  # 说明：显式标注类型，避免静态检查误报
+            ImportSessionItem,  # 说明：目标类型
+            ImportSessionItem(
             line_no=item.line_no,  # 说明：源行号
             action="manual_duplicate",  # 说明：动作类型
             note_id=int(note.id),  # 说明：新笔记 ID
@@ -280,6 +282,7 @@ def _create_duplicate_note(mw, session: ImportSession, item: ImportSessionItem) 
             fields=list(item.fields),  # 说明：写入字段
             tags=list(item.tags),  # 说明：写入标签
             duplicate_note_ids=list(item.duplicate_note_ids),  # 说明：重复列表
+            ),
         )
     )
 
@@ -294,7 +297,9 @@ def _append_manual_update(  # 说明：记录手动更新动作
     old_tags: List[str],  # 说明：更新前标签
 ) -> None:  # 说明：无返回值
     session.items.append(  # 说明：追加会话记录
-        ImportSessionItem(
+        cast(  # 说明：显式标注类型，避免静态检查误报
+            ImportSessionItem,  # 说明：目标类型
+            ImportSessionItem(
             line_no=item.line_no,  # 说明：源行号
             action="manual_update",  # 说明：动作类型
             note_id=int(note_id),  # 说明：笔记 ID
@@ -305,6 +310,7 @@ def _append_manual_update(  # 说明：记录手动更新动作
             old_fields=list(old_fields),  # 说明：更新前字段
             old_tags=list(old_tags),  # 说明：更新前标签
             duplicate_note_ids=list(item.duplicate_note_ids),  # 说明：重复列表
+            ),
         )
     )
 
@@ -368,7 +374,7 @@ def rollback_session(mw, session: ImportSession) -> RollbackResult:  # 说明：
             message = f"回滚失败 note_id={item.note_id}: {exc}"  # 说明：构造错误信息
             logger.error(message)  # 说明：记录日志
             result.errors.append(message)  # 说明：记录错误
-    return result  # 说明：返回回滚结果
+    return cast(RollbackResult, result)  # 说明：返回回滚结果并显式标注类型
 
 
 def _restore_note(mw, note_id: int, fields: List[str], tags: List[str]) -> None:  # 说明：恢复笔记字段与标签
@@ -418,13 +424,16 @@ def _dict_to_session(data: dict) -> ImportSession:  # 说明：把 dict 转为 I
     strategy_overrides = data.get("strategy_overrides", {})  # 说明：读取策略覆盖
     if not isinstance(strategy_overrides, dict):  # 说明：类型兜底
         strategy_overrides = {}  # 说明：回退为空字典
-    return ImportSession(  # 说明：构造会话对象
+    return cast(  # 说明：显式标注类型，避免静态检查误报
+        ImportSession,  # 说明：目标类型
+        ImportSession(  # 说明：构造会话对象
         session_id=str(data.get("session_id", "")),  # 说明：会话 ID
         created_at=str(data.get("created_at", "")),  # 说明：创建时间
         source_path=str(data.get("source_path", "")),  # 说明：源文件路径
         duplicate_mode=str(data.get("duplicate_mode", "")),  # 说明：重复策略
         items=items,  # 说明：会话条目
         strategy_overrides={str(k): str(v) for k, v in strategy_overrides.items()},  # 说明：确保为字符串映射
+        ),
     )
 
 
