@@ -77,7 +77,7 @@ def _import_section(mw, section, config: dict, result: ImportResult, session: Im
     tags_from_extra = bool(config.get("tags_from_extra_column", True))  # 说明：是否从额外列读取标签
     joiner = str(config.get("field_extra_joiner", "\n"))  # 说明：字段拼接符
     scope_deck_only = bool(config.get("import_scope_deck_only", True))  # 说明：重复检测范围
-    deck_tag = normalize_deck_tag(section.deck_name, strip_regex)  # 说明：生成章节标签
+    deck_tags = normalize_deck_tag(section.deck_name, strip_regex)  # 说明：生成章节标签列表
     for row in section.rows:  # 说明：逐行导入
         try:  # 说明：单行错误不影响整体
             field_values, row_tags = _prepare_fields_and_tags(  # 说明：整理字段与标签
@@ -89,7 +89,7 @@ def _import_section(mw, section, config: dict, result: ImportResult, session: Im
             )
             all_tags = _merge_tags(  # 说明：合并标签
                 row_tags,  # 说明：行内标签
-                deck_tag if tags_add_chapter else "",  # 说明：章节标签
+                deck_tags if tags_add_chapter else [],  # 说明：章节标签列表
                 section.note_type if tags_add_note_type else "",  # 说明：题型标签
                 tags_splitter,  # 说明：分隔符
             )
@@ -209,10 +209,11 @@ def _split_tags(text: str, splitter: str) -> List[str]:  # 说明：拆分标签
     return [item for item in normalized.split(splitter) if item]  # 说明：按配置分隔并去空
 
 
-def _merge_tags(row_tags: List[str], deck_tag: str, type_tag: str, splitter: str) -> List[str]:  # 说明：合并标签
+def _merge_tags(row_tags: List[str], deck_tags: List[str], type_tag: str, splitter: str) -> List[str]:  # 说明：合并标签
     merged = list(row_tags)  # 说明：复制行内标签
-    if deck_tag and deck_tag not in merged:  # 说明：追加章节标签
-        merged.append(deck_tag)  # 说明：加入章节标签
+    for deck_tag in deck_tags:  # 说明：逐个处理章节标签
+        if deck_tag and deck_tag not in merged:  # 说明：仅追加缺失的标签
+            merged.append(deck_tag)  # 说明：加入章节标签
     if type_tag and type_tag not in merged:  # 说明：追加题型标签
         merged.append(type_tag)  # 说明：加入题型标签
     merged = [item.strip() for item in merged if item.strip()]  # 说明：去除空标签
