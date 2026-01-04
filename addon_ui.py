@@ -6,6 +6,7 @@
 from __future__ import annotations  # 说明：允许前向引用类型标注
 
 from typing import List, Optional  # 说明：类型标注所需
+from threading import Event  # 说明：线程安全的取消标记
 
 from aqt import mw  # 说明：Anki 主窗口对象
 from aqt.operations import QueryOp  # 说明：后台任务封装
@@ -19,6 +20,7 @@ from aqt.qt import (  # 说明：Qt 组件
     QHBoxLayout,  # 说明：水平布局
     QLabel,  # 说明：文本标签
     QLineEdit,  # 说明：单行输入框
+    QProgressBar,  # 说明：进度条
     QPushButton,  # 说明：按钮
     QSpinBox,  # 说明：数值选择
     QTabWidget,  # 说明：选项卡组件
@@ -377,6 +379,78 @@ class DuplicateReviewDialog(QDialog):  # 说明：重复处理对话框
         showInfo(f"已更新 {updated_count} 条重复项")  # 说明：提示用户
 
 
+class TtsProgressDialog(QDialog):  # 说明：TTS 进度对话框
+    """非阻塞展示 TTS 进度，支持隐藏与请求停止。"""  # 说明：类说明
+
+    def __init__(self, parent=None) -> None:  # 说明：初始化对话框
+        super().__init__(parent)  # 说明：调用父类初始化
+        self._cancel_event = Event()  # 说明：取消标记
+        self._total = 0  # 说明：记录总数
+        self.setWindowTitle("TTS 进度")  # 说明：设置标题
+        self.setModal(False)  # 说明：非模态，避免阻塞主界面
+        layout = QVBoxLayout()  # 说明：主布局
+        self.setLayout(layout)  # 说明：应用布局
+        self._status_label = QLabel("准备中")  # 说明：状态文本
+        layout.addWidget(self._status_label)  # 说明：加入布局
+        self._count_label = QLabel("0/0")  # 说明：数量文本
+        layout.addWidget(self._count_label)  # 说明：加入布局
+        self._progress_bar = QProgressBar()  # 说明：进度条
+        self._progress_bar.setRange(0, 1)  # 说明：设置范围避免除零
+        self._progress_bar.setValue(0)  # 说明：初始化进度
+        layout.addWidget(self._progress_bar)  # 说明：加入布局
+        btn_layout = QHBoxLayout()  # 说明：按钮布局
+        self._cancel_btn = QPushButton("停止生成")  # 说明：停止按钮
+        self._cancel_btn.clicked.connect(self._on_cancel_clicked)  # 说明：绑定停止
+        btn_layout.addWidget(self._cancel_btn)  # 说明：加入布局
+        self._hide_btn = QPushButton("隐藏")  # 说明：隐藏按钮
+        self._hide_btn.clicked.connect(self._on_hide_clicked)  # 说明：绑定隐藏
+        btn_layout.addWidget(self._hide_btn)  # 说明：加入布局
+        layout.addLayout(btn_layout)  # 说明：加入主布局
+
+    def reset(self, total: int) -> None:  # 说明：重置进度数据
+        self._cancel_event.clear()  # 说明：清空中止标记
+        self._total = max(0, int(total))  # 说明：记录总数
+        self._status_label.setText("准备任务")  # 说明：更新状态
+        self._count_label.setText(f"0/{self._total}")  # 说明：更新数量
+        self._progress_bar.setRange(0, self._total if self._total > 0 else 1)  # 说明：设置范围
+        self._progress_bar.setValue(0)  # 说明：进度归零
+        self._cancel_btn.setEnabled(True)  # 说明：允许停止
+
+    def update_progress(self, done: int, total: int, status: str) -> None:  # 说明：更新进度显示
+        safe_total = max(0, int(total))  # 说明：安全总数
+        if safe_total != self._total:  # 说明：总数变化时更新
+            self._total = safe_total  # 说明：记录新总数
+            self._progress_bar.setRange(0, self._total if self._total > 0 else 1)  # 说明：更新范围
+        safe_done = max(0, int(done))  # 说明：安全已完成数
+        if self._total > 0:  # 说明：有总数时限制上界
+            safe_done = min(safe_done, self._total)  # 说明：避免超过总数
+        self._status_label.setText(status)  # 说明：更新状态
+        self._count_label.setText(f"{safe_done}/{self._total}")  # 说明：更新数量
+        self._progress_bar.setValue(safe_done)  # 说明：更新进度条
+
+    def mark_finished(self, cancelled: bool) -> None:  # 说明：标记完成或中止
+        if cancelled:  # 说明：用户请求中止
+            self._status_label.setText("已停止（等待已提交任务结束）")  # 说明：提示用户
+        else:  # 说明：正常完成
+            self._status_label.setText("生成完成")  # 说明：提示完成
+        self._cancel_btn.setEnabled(False)  # 说明：完成后禁用停止
+
+    def is_cancel_requested(self) -> bool:  # 说明：是否请求中止
+        return self._cancel_event.is_set()  # 说明：返回标记状态
+
+    def _on_cancel_clicked(self) -> None:  # 说明：点击停止
+        self._cancel_event.set()  # 说明：设置中止标记
+        self._status_label.setText("已请求停止")  # 说明：提示正在停止
+        self._cancel_btn.setEnabled(False)  # 说明：避免重复点击
+
+    def _on_hide_clicked(self) -> None:  # 说明：点击隐藏
+        self.hide()  # 说明：隐藏窗口但不停止任务
+
+    def closeEvent(self, event) -> None:  # 说明：重载关闭行为
+        event.ignore()  # 说明：阻止销毁
+        self.hide()  # 说明：关闭时仅隐藏
+
+
 class TtsTab(QWidget):  # 说明：TTS 页面
     """TTS 配置与执行界面。"""  # 说明：类说明
 
@@ -386,8 +460,14 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._addon_name = addon_name  # 说明：插件名称
         self._get_import_ids = get_import_ids  # 说明：回调读取最近导入 ID
         self._tasks = []  # 说明：缓存任务列表
+        self._progress_dialog: Optional[TtsProgressDialog] = None  # 说明：TTS 进度对话框
         self._build_ui()  # 说明：构建 UI
         self.refresh_import_scope()  # 说明：初始化状态
+
+    def _ensure_progress_dialog(self) -> TtsProgressDialog:  # 说明：获取或创建进度对话框
+        if self._progress_dialog is None:  # 说明：首次创建
+            self._progress_dialog = TtsProgressDialog(self)  # 说明：初始化进度对话框
+        return self._progress_dialog  # 说明：返回对话框
 
     def _build_ui(self) -> None:  # 说明：构建 UI
         layout = QVBoxLayout()  # 说明：主布局
@@ -703,6 +783,9 @@ class TtsTab(QWidget):  # 说明：TTS 页面
             return  # 说明：结束处理
         tasks = list(self._tasks)  # 说明：复制任务，避免异步修改
         total = len(tasks)  # 说明：记录任务总数
+        progress_dialog = self._ensure_progress_dialog()  # 说明：准备进度对话框
+        progress_dialog.reset(total)  # 说明：重置进度数据
+        progress_dialog.show()  # 说明：显示非阻塞进度对话框
         self._run_btn.setEnabled(False)  # 说明：执行期间禁用按钮
         self._scan_btn.setEnabled(False)  # 说明：执行期间禁用扫描
         self._tts_status.setText(f"后台生成中：0/{total}")  # 说明：更新状态
@@ -710,12 +793,18 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         def _progress_callback(done: int, total_count: int, status: str) -> None:  # 说明：进度回调
             def _update_ui() -> None:  # 说明：在主线程更新 UI
                 self._tts_status.setText(f"{status}：{done}/{total_count}")  # 说明：更新状态文本
-                mw.progress.update(label=status, value=done, max=total_count)  # 说明：更新进度条
+                progress_dialog.update_progress(done, total_count, status)  # 说明：更新进度对话框
             mw.taskman.run_on_main(_update_ui)  # 说明：切回主线程执行
 
         def _op(col):  # 说明：后台执行的操作
             try:  # 说明：捕获后台异常
-                return ensure_audio_for_tasks(col, tasks, self._config.get("tts", {}), progress_callback=_progress_callback)  # 说明：执行生成
+                return ensure_audio_for_tasks(  # 说明：执行生成
+                    col,  # 说明：集合对象
+                    tasks,  # 说明：任务列表
+                    self._config.get("tts", {}),  # 说明：TTS 配置
+                    progress_callback=_progress_callback,  # 说明：进度回调
+                    should_cancel=progress_dialog.is_cancel_requested,  # 说明：取消检查
+                )
             except Exception as exc:  # 说明：捕获异常
                 logger.error(f"TTS 失败: {exc}")  # 说明：记录日志
                 result = TtsResult()  # 说明：构造空结果
@@ -725,18 +814,23 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         def _on_success(result) -> None:  # 说明：后台成功回调
             self._run_btn.setEnabled(True)  # 说明：恢复按钮
             self._scan_btn.setEnabled(True)  # 说明：恢复扫描按钮
-            self._tts_status.setText("生成完成")  # 说明：更新状态
+            cancelled = progress_dialog.is_cancel_requested()  # 说明：读取是否中止
+            self._tts_status.setText("已停止" if cancelled else "生成完成")  # 说明：更新状态
+            progress_dialog.mark_finished(cancelled)  # 说明：更新进度对话框状态
             showInfo(  # 说明：提示结果
-                f"TTS 完成：生成 {result.generated} 条，复用 {result.reused} 条，跳过 {result.skipped} 条，错误 {len(result.errors)} 条"
-            )
+                (  # 说明：组合提示文本
+                    ("TTS 已停止" if cancelled else "TTS 完成")  # 说明：状态前缀
+                    + f"：生成 {result.generated} 条，复用 {result.reused} 条，跳过 {result.skipped} 条，错误 {len(result.errors)} 条"  # 说明：拼接统计信息
+                )  # 说明：组合结束
+            )  # 说明：显示弹窗
             if result.errors:  # 说明：若有错误
                 showText("\n".join(result.errors))  # 说明：展示错误详情
-            if self._open_browser_after_tts.isChecked():  # 说明：需要打开浏览器
+            if not cancelled and self._open_browser_after_tts.isChecked():  # 说明：需要打开浏览器且未中止
                 note_ids = [task.note_id for task in tasks]  # 说明：收集任务笔记 ID
                 note_ids = list(dict.fromkeys(note_ids))  # 说明：去重并保持顺序
                 open_browser_with_note_ids(mw, note_ids)  # 说明：打开浏览器定位
 
-        QueryOp(parent=mw, op=_op, success=_on_success).with_progress().run_in_background()  # 说明：后台运行
+        QueryOp(parent=mw, op=_op, success=_on_success).run_in_background()  # 说明：后台运行（无阻塞进度框）
 
 
 class SessionTab(QWidget):  # 说明：会话记录页面

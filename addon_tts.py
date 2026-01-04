@@ -65,6 +65,7 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
     tasks: List[TtsTask],  # 说明：待处理任务
     config: Dict[str, Any],  # 说明：TTS 配置
     progress_callback: Optional[Callable[[int, int, str], None]] = None,  # 说明：进度回调
+    should_cancel: Optional[Callable[[], bool]] = None,  # 说明：取消检查回调
 ) -> TtsResult:  # 说明：返回执行结果
     result = TtsResult()  # 说明：初始化结果
     if col is None:  # 说明：集合为空
@@ -79,6 +80,7 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
     total = len(tasks)  # 说明：任务总数
     processed = 0  # 说明：已处理数量
     last_progress_time = 0.0  # 说明：上次进度更新时间
+    cancelled = False  # 说明：记录是否已中止
 
     def _report_progress(status: str) -> None:  # 说明：内部进度上报
         nonlocal last_progress_time  # 说明：声明使用外层变量
@@ -90,9 +92,25 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
         last_progress_time = now  # 说明：记录更新时间
         progress_callback(processed, total, status)  # 说明：触发回调
 
+    def _is_cancelled() -> bool:  # 说明：检查是否请求中止
+        if should_cancel is None:  # 说明：未提供取消回调
+            return False  # 说明：默认不取消
+        return bool(should_cancel())  # 说明：读取取消状态
+
+    def _mark_cancelled() -> None:  # 说明：记录中止状态
+        nonlocal cancelled  # 说明：使用外层变量
+        if cancelled:  # 说明：避免重复记录
+            return  # 说明：直接返回
+        cancelled = True  # 说明：标记已中止
+        result.errors.append("已中止：用户请求停止 TTS 任务")  # 说明：记录中止原因
+        _report_progress("已中止")  # 说明：上报进度
+
     _report_progress("准备任务")  # 说明：初始进度
     pending: List[Tuple[TtsTask, str]] = []  # 说明：待合成任务列表
     for task in tasks:  # 说明：逐任务预处理
+        if _is_cancelled():  # 说明：检测中止请求
+            _mark_cancelled()  # 说明：记录中止
+            break  # 说明：停止预处理
         try:  # 说明：单条失败不影响整体
             note = col.get_note(task.note_id)  # 说明：读取笔记对象
             if note is None:  # 说明：笔记不存在
@@ -117,6 +135,8 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
             result.errors.append(error_text)  # 说明：记录错误
             processed += 1  # 说明：更新计数
             _report_progress("发生错误")  # 说明：上报进度
+    if cancelled:  # 说明：已中止则直接返回
+        return result  # 说明：返回当前结果
     if not pending:  # 说明：没有待合成任务
         _report_progress("完成")  # 说明：完成提示
         return result  # 说明：直接返回
@@ -127,6 +147,9 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
 
     if concurrency <= 1:  # 说明：单线程顺序合成
         for task, filename in pending:  # 说明：逐条合成
+            if _is_cancelled():  # 说明：检测中止请求
+                _mark_cancelled()  # 说明：记录中止
+                break  # 说明：跳出循环
             try:  # 说明：捕获单条异常
                 audio_data = azure_synthesize(azure_cfg, task.text, task.voice_name)  # 说明：调用 Azure 合成
                 _handle_audio_result(task, filename, audio_data)  # 说明：写入结果
@@ -137,15 +160,23 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
                 result.errors.append(error_text)  # 说明：记录错误
             processed += 1  # 说明：更新计数
             _report_progress("生成中")  # 说明：上报进度
+        if cancelled:  # 说明：中止后直接返回
+            return result  # 说明：返回当前结果
         _report_progress("完成")  # 说明：完成提示
         return result  # 说明：返回结果
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:  # 说明：并发执行合成请求
         future_map = {}  # 说明：任务映射表
         for task, filename in pending:  # 说明：提交任务
+            if _is_cancelled():  # 说明：检测中止请求
+                _mark_cancelled()  # 说明：记录中止
+                break  # 说明：停止提交
             future = executor.submit(azure_synthesize, azure_cfg, task.text, task.voice_name)  # 说明：提交合成任务
             future_map[future] = (task, filename)  # 说明：保存映射
         for future in as_completed(future_map):  # 说明：按完成顺序处理
+            if _is_cancelled():  # 说明：检测中止请求
+                _mark_cancelled()  # 说明：记录中止
+                break  # 说明：停止处理剩余任务
             task, filename = future_map[future]  # 说明：取回任务信息
             try:  # 说明：捕获合成异常
                 audio_data = future.result()  # 说明：获取合成结果
@@ -157,6 +188,8 @@ def ensure_audio_for_tasks(  # 说明：执行 TTS 任务（支持后台与进�
                 result.errors.append(error_text)  # 说明：记录错误
             processed += 1  # 说明：更新计数
             _report_progress("生成中")  # 说明：上报进度
+    if cancelled:  # 说明：中止后直接返回
+        return result  # 说明：返回当前结果
     _report_progress("完成")  # 说明：完成提示
     return result  # 说明：返回结果
 
