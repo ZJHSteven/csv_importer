@@ -522,6 +522,10 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         self._overwrite_audio.setChecked(bool(self._config.get("tts", {}).get("overwrite_existing_audio", False)))  # 说明：读取默认值
         self._overwrite_audio.stateChanged.connect(self._on_overwrite_changed)  # 说明：保存修改
         form.addRow("覆盖模式", self._overwrite_audio)  # 说明：添加表单行
+        self._tag_input = QLineEdit(self._config.get("tts", {}).get("english_tag", "英文"))  # 说明：扫描标签输入框
+        self._tag_input.setPlaceholderText("例如 题型::英文词根-词缀卡片（留空=不过滤）")  # 说明：输入提示
+        self._tag_input.textChanged.connect(self._on_tts_tag_changed)  # 说明：保存标签配置
+        form.addRow("扫描标签", self._tag_input)  # 说明：添加表单行
         self._ssml_editor = QTextEdit()  # 说明：SSML 编辑框
         self._ssml_editor.setPlainText(self._config.get("tts", {}).get("azure", {}).get("ssml_template", ""))  # 说明：填充模板
         self._ssml_editor.textChanged.connect(self._on_ssml_changed)  # 说明：保存修改
@@ -578,6 +582,11 @@ class TtsTab(QWidget):  # 说明：TTS 页面
 
     def _on_key_changed(self, value: str) -> None:  # 说明：Key 变更
         self._config.setdefault("tts", {}).setdefault("azure", {})["subscription_key"] = value  # 说明：写入配置
+        save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
+
+    def _on_tts_tag_changed(self, value: str) -> None:  # 说明：TTS 扫描标签变更
+        cleaned = str(value or "").strip()  # 说明：清理输入内容
+        self._config.setdefault("tts", {})["english_tag"] = cleaned  # 说明：写入配置
         save_config(mw, self._addon_name, self._config)  # 说明：持久化配置
 
     def _on_ssml_changed(self) -> None:  # 说明：SSML 模板变更
@@ -758,7 +767,11 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         ]
 
     def _scan_tasks(self) -> None:  # 说明：扫描需要生成的笔记
-        english_tag = self._config.get("tts", {}).get("english_tag", "英文")  # 说明：读取英文标签
+        input_tag = ""  # 说明：初始化扫描标签
+        if hasattr(self, "_tag_input"):  # 说明：确保输入框已创建
+            input_tag = self._tag_input.text().strip()  # 说明：读取用户输入
+        if not input_tag:  # 说明：输入为空则回退配置值
+            input_tag = str(self._config.get("tts", {}).get("english_tag", "英文")).strip()  # 说明：读取配置标签
         if mw.col is None:  # 说明：集合未加载或已关闭
             showInfo("当前未加载集合，无法扫描 TTS 任务。")  # 说明：提示用户
             return  # 说明：中止扫描流程
@@ -770,9 +783,9 @@ class TtsTab(QWidget):  # 说明：TTS 页面
         if self._use_import_scope.isChecked():  # 说明：仅使用导入范围
             note_ids = self._get_import_ids()  # 说明：读取最近导入 ID
         else:  # 说明：全库扫描
-            query = _build_tts_query(english_tag, selected_decks)  # 说明：构造搜索语句
+            query = _build_tts_query(input_tag, selected_decks)  # 说明：构造搜索语句
             note_ids = [int(nid) for nid in mw.col.find_notes(query)]  # 说明：按查询语句查找
-        note_ids = _filter_note_ids_by_tag(mw, note_ids, english_tag)  # 说明：按英文标签二次过滤
+        note_ids = _filter_note_ids_by_tag(mw, note_ids, input_tag)  # 说明：按扫描标签二次过滤
         note_ids = _filter_note_ids_by_decks(mw, note_ids, selected_decks)  # 说明：按牌组二次过滤
         self._tasks = build_tts_tasks(mw, note_ids, self._config.get("tts", {}))  # 说明：构建任务
         self._tts_status.setText(f"待生成 {len(self._tasks)} 条")  # 说明：更新状态
