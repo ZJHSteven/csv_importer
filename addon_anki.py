@@ -157,19 +157,27 @@ def _run_browser_search(browser, query: str) -> None:  # 说明：兼容不同�
             return  # 说明：结束处理
 
 
-def normalize_deck_tag(deck_name: str, strip_regex: str) -> List[str]:  # 说明：从牌堆名生成“多层级标签列表”
+def normalize_deck_tag(deck_name: str, strip_regex: str) -> List[str]:  # 说明：从牌堆名生成“树状标签列表”
     if not deck_name:  # 说明：空值保护
         return []  # 说明：返回空列表
+    parts = _normalize_deck_parts(deck_name, strip_regex)  # 说明：清理并规范化层级名称
+    if not parts:  # 说明：清理后为空
+        return []  # 说明：返回空列表
+    deck_tag = "::".join(parts)  # 说明：拼接成树状标签
+    return [deck_tag]  # 说明：按列表返回单个树状标签
+
+
+def _normalize_deck_parts(deck_name: str, strip_regex: str) -> List[str]:  # 说明：清理牌堆层级名称
     parts = deck_name.split("::")  # 说明：按层级分拆牌堆名称
-    normalized: List[str] = []  # 说明：保存去重后的标签列表
+    normalized: List[str] = []  # 说明：保存去重后的层级名称
     try:  # 说明：捕获正则异常
         for part in parts:  # 说明：逐级处理每个层级
             cleaned = re.sub(strip_regex, "", part).strip()  # 说明：去掉序号前缀并清理空白
             if cleaned and cleaned not in normalized:  # 说明：非空且未出现过
-                normalized.append(cleaned)  # 说明：加入标签列表
+                normalized.append(cleaned)  # 说明：加入层级列表
     except re.error:  # 说明：正则非法时回退
         for part in parts:  # 说明：逐级处理每个层级
             cleaned = part.strip()  # 说明：只做基础清理
             if cleaned and cleaned not in normalized:  # 说明：非空且未出现过
-                normalized.append(cleaned)  # 说明：加入标签列表
-    return normalized  # 说明：返回清理后的标签列表
+                normalized.append(cleaned)  # 说明：加入层级列表
+    return normalized  # 说明：返回清理后的层级列表
