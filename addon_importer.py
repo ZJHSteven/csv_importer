@@ -229,56 +229,6 @@ def _contains_type_tag(tags: List[str], prefix: str) -> bool:  # 说明：判断
     return False  # 说明：未找到题型标签
 
 
-def _split_tag_parts(tag: str) -> List[str]:  # 说明：将树状标签拆为层级
-    if not tag:  # 说明：空字符串直接返回
-        return []  # 说明：无层级
-    return [item.strip() for item in tag.split("::") if item.strip()]  # 说明：去空并保留顺序
-
-
-def _find_deck_overlap(deck_parts: List[str], tag_parts: List[str]) -> int:  # 说明：查找可重叠层级长度
-    max_size = min(len(deck_parts), len(tag_parts))  # 说明：最大可能重叠长度
-    for size in range(max_size, 0, -1):  # 说明：从最大重叠开始尝试
-        if deck_parts[-size:] == tag_parts[:size]:  # 说明：尾部与头部匹配
-            return size  # 说明：返回匹配长度
-    return 0  # 说明：无重叠
-
-
-def _prefix_tag_with_deck(tag: str, deck_parts: List[str]) -> str:  # 说明：为标签补齐牌堆前缀
-    tag_parts = _split_tag_parts(tag)  # 说明：拆分标签层级
-    if not tag_parts:  # 说明：空标签直接返回原值
-        return tag  # 说明：原样返回
-    if deck_parts[:len(tag_parts)] == tag_parts:  # 说明：标签已是牌堆前缀
-        merged_parts = list(deck_parts)  # 说明：直接使用牌堆层级
-    else:  # 说明：需要根据重叠情况拼接
-        overlap = _find_deck_overlap(deck_parts, tag_parts)  # 说明：计算重叠层级长度
-        if overlap > 0:  # 说明：存在重叠层级
-            merged_parts = list(deck_parts[:-overlap]) + list(tag_parts)  # 说明：补齐缺失前缀
-        else:  # 说明：无重叠时直接拼接
-            merged_parts = list(deck_parts) + list(tag_parts)  # 说明：完整前缀 + 原标签
-    return "::".join(merged_parts)  # 说明：合并为树状标签字符串
-
-
-def _apply_deck_prefix_to_tags(row_tags: List[str], deck_tag: str, type_prefix: str) -> List[str]:  # 说明：为普通标签补齐牌堆前缀
-    normalized: List[str] = []  # 说明：准备返回的新标签列表
-    deck_parts = _split_tag_parts(deck_tag)  # 说明：拆分牌堆层级
-    for raw_tag in row_tags:  # 说明：逐个处理行内标签
-        cleaned = raw_tag.strip()  # 说明：清理空白
-        if not cleaned:  # 说明：空标签跳过
-            continue  # 说明：继续下一个标签
-        if _is_type_tag(cleaned, type_prefix):  # 说明：题型标签不套牌堆前缀
-            normalized.append(cleaned)  # 说明：保留原题型标签
-            continue  # 说明：进入下一个标签
-        if not deck_parts:  # 说明：没有牌堆前缀
-            normalized.append(cleaned)  # 说明：保留原标签
-            continue  # 说明：进入下一个标签
-        if cleaned == deck_tag or cleaned.startswith(f"{deck_tag}::"):  # 说明：已带牌堆前缀
-            normalized.append(cleaned)  # 说明：直接保留
-            continue  # 说明：进入下一个标签
-        prefixed = _prefix_tag_with_deck(cleaned, deck_parts)  # 说明：补齐牌堆前缀
-        normalized.append(prefixed)  # 说明：保存补齐后的标签
-    return normalized  # 说明：返回处理后的标签列表
-
-
 def _contains_deck_tag_or_child(tags: List[str], deck_tag: str) -> bool:  # 说明：判断是否已包含牌堆标签或其子标签
     if not deck_tag:  # 说明：空牌堆标签直接返回
         return False  # 说明：不视为已包含
@@ -294,9 +244,7 @@ def _contains_deck_tag_or_child(tags: List[str], deck_tag: str) -> bool:  # 说�
 def _merge_tags(row_tags: List[str], deck_tags: List[str], type_tag: str, splitter: str) -> List[str]:  # 说明：合并标签
     _ = splitter  # 说明：保留参数位，便于后续扩展
     type_prefix = "题型::"  # 说明：题型标签统一前缀
-    deck_root = deck_tags[0] if deck_tags else ""  # 说明：用于补齐前缀的牌堆标签
-    normalized_rows = _apply_deck_prefix_to_tags(row_tags, deck_root, type_prefix)  # 说明：补齐行内标签的牌堆前缀
-    merged = list(normalized_rows)  # 说明：复制行内标签
+    merged = [tag.strip() for tag in row_tags if tag.strip()]  # 说明：清理行内标签但不改写结构
     for deck_tag in deck_tags:  # 说明：逐个处理章节标签
         if not deck_tag:  # 说明：空标签跳过
             continue  # 说明：进入下一项
