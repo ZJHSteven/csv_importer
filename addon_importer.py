@@ -279,6 +279,18 @@ def _apply_deck_prefix_to_tags(row_tags: List[str], deck_tag: str, type_prefix: 
     return normalized  # 说明：返回处理后的标签列表
 
 
+def _contains_deck_tag_or_child(tags: List[str], deck_tag: str) -> bool:  # 说明：判断是否已包含牌堆标签或其子标签
+    if not deck_tag:  # 说明：空牌堆标签直接返回
+        return False  # 说明：不视为已包含
+    prefix = f"{deck_tag}::"  # 说明：子标签前缀
+    for tag in tags:  # 说明：逐个检查标签
+        if tag == deck_tag:  # 说明：已包含牌堆标签本身
+            return True  # 说明：直接返回 True
+        if tag.startswith(prefix):  # 说明：存在子标签
+            return True  # 说明：直接返回 True
+    return False  # 说明：未包含则返回 False
+
+
 def _merge_tags(row_tags: List[str], deck_tags: List[str], type_tag: str, splitter: str) -> List[str]:  # 说明：合并标签
     _ = splitter  # 说明：保留参数位，便于后续扩展
     type_prefix = "题型::"  # 说明：题型标签统一前缀
@@ -286,8 +298,11 @@ def _merge_tags(row_tags: List[str], deck_tags: List[str], type_tag: str, splitt
     normalized_rows = _apply_deck_prefix_to_tags(row_tags, deck_root, type_prefix)  # 说明：补齐行内标签的牌堆前缀
     merged = list(normalized_rows)  # 说明：复制行内标签
     for deck_tag in deck_tags:  # 说明：逐个处理章节标签
-        if deck_tag and deck_tag not in merged:  # 说明：仅追加缺失的标签
-            merged.append(deck_tag)  # 说明：加入章节标签
+        if not deck_tag:  # 说明：空标签跳过
+            continue  # 说明：进入下一项
+        if _contains_deck_tag_or_child(merged, deck_tag):  # 说明：已有子标签则无需追加
+            continue  # 说明：避免重复层级
+        merged.append(deck_tag)  # 说明：加入章节标签
     built_type = _build_type_tag(type_tag, type_prefix)  # 说明：生成题型标签
     if built_type and not _contains_type_tag(merged, type_prefix):  # 说明：无题型标签时才补齐
         merged.append(built_type)  # 说明：加入题型标签
