@@ -780,8 +780,23 @@ class TtsTab(QWidget):  # 说明：TTS 页面
             showInfo("请先选择需要扫描的牌组")  # 说明：提示用户
             return  # 说明：中止扫描
         note_ids: List[int] = []  # 说明：初始化 ID 列表
-        if self._use_import_scope.isChecked():  # 说明：仅使用导入范围
+        requested_import_scope = self._use_import_scope.isChecked()  # 说明：记录用户是否勾选“仅处理最近导入”
+        effective_import_scope = requested_import_scope  # 说明：记录本次扫描实际采用的范围，日志里会写清楚
+        scope_hint = ""  # 说明：界面状态补充说明
+        if requested_import_scope:  # 说明：优先按最近导入范围扫描
             note_ids = self._get_import_ids()  # 说明：读取最近导入 ID
+            if not note_ids and selected_decks:  # 说明：最近导入为空但用户明确选了牌组，自动回退到牌组扫描
+                effective_import_scope = False  # 说明：实际不再使用空的最近导入范围
+                scope_hint = "；最近导入为空，已按选中牌组扫描"  # 说明：把回退行为展示给用户，不额外弹窗打断
+                query = _build_tts_query(input_tag, selected_decks)  # 说明：按标签与牌组构造查询
+                note_ids = [int(nid) for nid in mw.col.find_notes(query)]  # 说明：执行牌组范围扫描
+            elif not note_ids:  # 说明：最近导入为空且没有牌组兜底
+                self._tasks = []  # 说明：清空旧任务，避免误点开始生成
+                self._tts_status.setText("最近导入范围为空；请取消勾选“仅处理最近导入的笔记”，或选择牌组后重新扫描。")  # 说明：状态栏说明原因
+                logger.warning(  # 说明：写入文件日志，不触发 Anki 弹窗
+                    "TTS 扫描停止: use_import_scope=True input=0 selected_decks=[] reason=最近导入范围为空"
+                )
+                return  # 说明：中止本次扫描
         else:  # 说明：全库扫描
             query = _build_tts_query(input_tag, selected_decks)  # 说明：构造搜索语句
             note_ids = [int(nid) for nid in mw.col.find_notes(query)]  # 说明：按查询语句查找
@@ -793,12 +808,13 @@ class TtsTab(QWidget):  # 说明：TTS 页面
             f"扫描到候选 {plan.candidate_note_count} 条；待处理 {len(plan.tasks)} 条"
             f"（需合成 {plan.needs_generation_count}，可复用 {plan.reusable_media_count}，"
             f"已有标记跳过 {plan.already_marked_count}，空文本 {plan.empty_text_count}，"
-            f"缺失/字段异常 {plan.missing_note_count + plan.field_error_count}）"
+            f"缺失/字段异常 {plan.missing_note_count + plan.field_error_count}）{scope_hint}"
         )
         self._tts_status.setText(status)  # 说明：更新状态
         logger.info(  # 说明：落盘扫描摘要，现场复现时可直接看日志
             "TTS 扫描摘要: "
-            f"use_import_scope={self._use_import_scope.isChecked()} "
+            f"use_import_scope={requested_import_scope} "
+            f"effective_import_scope={effective_import_scope} "
             f"limit_decks={self._limit_decks.isChecked()} "
             f"selected_decks={selected_decks} "
             f"input={plan.source_note_count} candidates={plan.candidate_note_count} "

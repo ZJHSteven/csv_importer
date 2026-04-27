@@ -51,14 +51,30 @@ class AppLogger:  # 说明：统一日志封装，便于后续替换为 Anki 的
     def __init__(self, name: str = "csv_importer") -> None:  # 说明：初始化日志对象
         self._logger = logging.getLogger(name)  # 说明：获取标准库 logger 实例
         self._logger.setLevel(logging.INFO)  # 说明：默认设置为 INFO 级别
-        if not self._logger.handlers:  # 说明：避免重复添加 handler
-            handler = logging.StreamHandler()  # 说明：输出到标准输出的 handler
-            formatter = logging.Formatter("[%(levelname)s] %(message)s")  # 说明：简单易读格式
-            handler.setFormatter(formatter)  # 说明：把格式器绑定到 handler
-            self._logger.addHandler(handler)  # 说明：将 handler 注册到 logger
-            file_handler = logging.FileHandler(get_log_path(), encoding="utf-8")  # 说明：同时写入插件本地日志文件，便于用户事后排查
+        self._logger.propagate = False  # 说明：不向 root logger 传播，避免 Anki 把普通 INFO 当插件错误弹窗
+        self._reset_handlers()  # 说明：清理旧版本可能注册过的 StreamHandler，插件热重载时尤其重要
+        formatter = logging.Formatter("[%(levelname)s] %(message)s")  # 说明：简单易读格式
+        try:  # 说明：文件日志失败时不能影响插件功能
+            file_handler = logging.FileHandler(get_log_path(), encoding="utf-8")  # 说明：仅写入插件本地日志文件，不写标准输出/错误流
             file_handler.setFormatter(formatter)  # 说明：文件日志沿用同一格式，降低阅读成本
             self._logger.addHandler(file_handler)  # 说明：注册文件 handler，Anki 重启后仍可保留历史错误
+        except Exception:  # 说明：极端情况下目录无权限或文件被锁定
+            self._logger.addHandler(logging.NullHandler())  # 说明：宁可丢日志，也不能让日志系统打断插件交互
+
+    def _reset_handlers(self) -> None:  # 说明：清空当前 logger 已注册的 handler
+        """移除并关闭 logger 上已有的 handler。
+
+        输入：无。
+        输出：无。
+        核心逻辑：旧版本曾经注册过 StreamHandler，会把 INFO 打到 Anki 捕获的流里并触发问题弹窗；
+        因此每次初始化都先清理旧 handler，再注册新的文件 handler。
+        """
+        for handler in list(self._logger.handlers):  # 说明：复制列表，避免遍历时修改原列表
+            self._logger.removeHandler(handler)  # 说明：从 logger 上移除旧 handler
+            try:  # 说明：关闭 handler 可能失败，但不应影响插件启动
+                handler.close()  # 说明：释放文件句柄或流对象
+            except Exception:  # 说明：关闭失败时忽略
+                pass  # 说明：继续清理其他 handler
 
     def info(self, message: str) -> None:  # 说明：输出普通信息
         self._logger.info(message)  # 说明：调用标准库 info
