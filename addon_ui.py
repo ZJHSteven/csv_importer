@@ -39,7 +39,7 @@ from .addon_anki import get_all_deck_names, open_browser_with_note_ids, update_n
 from .addon_config import get_default_config, load_config, save_config  # 说明：配置读写
 from .addon_importer import import_parse_result  # 说明：导入逻辑
 from .addon_parser import parse_file  # 说明：解析逻辑
-from .addon_tts import azure_list_voices, build_tts_tasks, ensure_audio_for_tasks  # 说明：TTS 逻辑
+from .addon_tts import azure_list_voices, ensure_audio_for_tasks, plan_tts_tasks  # 说明：TTS 逻辑
 from .addon_models import ImportSession, ImportSessionItem, ParseResult, TtsResult  # 说明：数据结构
 from .addon_errors import logger  # 说明：日志
 from .addon_session import (  # 说明：会话记录能力
@@ -787,8 +787,27 @@ class TtsTab(QWidget):  # 说明：TTS 页面
             note_ids = [int(nid) for nid in mw.col.find_notes(query)]  # 说明：按查询语句查找
         note_ids = _filter_note_ids_by_tag(mw, note_ids, input_tag)  # 说明：按扫描标签二次过滤
         note_ids = _filter_note_ids_by_decks(mw, note_ids, selected_decks)  # 说明：按牌组二次过滤
-        self._tasks = build_tts_tasks(mw, note_ids, self._config.get("tts", {}))  # 说明：构建任务
-        self._tts_status.setText(f"待生成 {len(self._tasks)} 条")  # 说明：更新状态
+        plan = plan_tts_tasks(mw, note_ids, self._config.get("tts", {}))  # 说明：构建任务并返回详细统计
+        self._tasks = plan.tasks  # 说明：只把真正需要执行的任务保存起来
+        status = (  # 说明：把“为什么数量对不上”直接展示在界面上，避免把可复用/已跳过误叫待生成
+            f"扫描到候选 {plan.candidate_note_count} 条；待处理 {len(plan.tasks)} 条"
+            f"（需合成 {plan.needs_generation_count}，可复用 {plan.reusable_media_count}，"
+            f"已有标记跳过 {plan.already_marked_count}，空文本 {plan.empty_text_count}，"
+            f"缺失/字段异常 {plan.missing_note_count + plan.field_error_count}）"
+        )
+        self._tts_status.setText(status)  # 说明：更新状态
+        logger.info(  # 说明：落盘扫描摘要，现场复现时可直接看日志
+            "TTS 扫描摘要: "
+            f"use_import_scope={self._use_import_scope.isChecked()} "
+            f"limit_decks={self._limit_decks.isChecked()} "
+            f"selected_decks={selected_decks} "
+            f"input={plan.source_note_count} candidates={plan.candidate_note_count} "
+            f"tasks={len(plan.tasks)} needs_generation={plan.needs_generation_count} "
+            f"reusable={plan.reusable_media_count} already_marked={plan.already_marked_count} "
+            f"empty_text={plan.empty_text_count} missing={plan.missing_note_count} "
+            f"field_errors={plan.field_error_count} "
+            f"missing_preview={plan.missing_note_ids[:10]} field_error_preview={plan.field_error_note_ids[:10]}"
+        )
 
     def _run_tts(self) -> None:  # 说明：执行 TTS 生成
         if not self._tasks:  # 说明：未扫描任务

@@ -58,6 +58,21 @@ class TtsTask:  # 说明：单条 TTS 任务
 
 
 @dataclass
+class TtsTaskPlan:  # 说明：TTS 扫描阶段的任务计划与统计
+    tasks: List[TtsTask] = field(default_factory=list)  # 说明：后续“开始生成”真正会处理的任务，包含需合成与可复用媒体两类
+    source_note_count: int = 0  # 说明：扫描入口传入的原始笔记数量，去重前
+    candidate_note_count: int = 0  # 说明：去重后的候选笔记数量
+    missing_note_count: int = 0  # 说明：ID 找不到对应笔记的数量，通常说明历史记录或搜索结果已过期
+    empty_text_count: int = 0  # 说明：文本字段为空，因此不会生成音频的数量
+    field_error_count: int = 0  # 说明：字段索引或字段名异常，无法读取/写入的数量
+    already_marked_count: int = 0  # 说明：目标字段已经有 sound 标记，且未开启覆盖，所以跳过的数量
+    reusable_media_count: int = 0  # 说明：媒体文件已经存在，只需要补 sound 标记的数量
+    needs_generation_count: int = 0  # 说明：确实需要调用 TTS 服务合成的数量
+    missing_note_ids: List[int] = field(default_factory=list)  # 说明：找不到的笔记 ID，日志中只展示前若干个
+    field_error_note_ids: List[int] = field(default_factory=list)  # 说明：字段异常的笔记 ID，方便定位配置问题
+
+
+@dataclass
 class TtsResult:  # 说明：TTS 执行结果
     generated: int = 0  # 说明：成功生成音频数量
     reused: int = 0  # 说明：复用已有媒体的数量

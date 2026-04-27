@@ -9,13 +9,14 @@ import hashlib  # 说明：用于生成稳定文件名
 import re  # 说明：用于清理旧音频标记
 import json  # 说明：用于自定义请求体处理
 import time  # 说明：用于进度节流
+import urllib.error  # 说明：细分 HTTP/URL 异常，输出更可诊断的错误
 import urllib.request  # 说明：使用标准库发起 HTTP 请求
 from concurrent.futures import ThreadPoolExecutor, as_completed  # 说明：并发下载音频
 from typing import Any, Callable, Dict, List, Optional, Tuple  # 说明：类型标注所需
 from urllib.parse import urlparse  # 说明：解析 URL 以做基础校验
 
 from .addon_errors import TtsError, logger  # 说明：统一异常与日志
-from .addon_models import TtsResult, TtsTask  # 说明：TTS 数据结构
+from .addon_models import TtsResult, TtsTask, TtsTaskPlan  # 说明：TTS 数据结构
 
 TTS_MEDIA_PREFIX = "tts_"  # 说明：插件生成的音频文件名前缀
 
@@ -231,26 +232,68 @@ def _remove_tts_markers(note, field_name: str) -> None:  # 说明：移除字段
 
 
 def build_tts_tasks(mw, note_ids: List[int], config: Dict[str, Any]) -> List[TtsTask]:  # 说明：生成 TTS 任务列表
-    tasks: List[TtsTask] = []  # 说明：初始化任务列表
+    return plan_tts_tasks(mw, note_ids, config).tasks  # 说明：保留旧接口，实际逻辑统一交给带统计的计划函数
+
+
+def plan_tts_tasks(mw, note_ids: List[int], config: Dict[str, Any]) -> TtsTaskPlan:  # 说明：生成 TTS 任务并给出扫描统计
+    """根据候选笔记 ID 生成 TTS 任务计划。
+
+    输入：
+    - mw：Anki 主窗口对象，函数会通过 mw.col 读取笔记与媒体库。
+    - note_ids：扫描阶段得到的候选笔记 ID，可能包含重复 ID 或已经失效的 ID。
+    - config：TTS 配置，包含字段索引、默认音色、覆盖策略等。
+
+    输出：
+    - TtsTaskPlan：既包含真正要执行的任务，也包含为什么数量和牌组显示不一致的诊断统计。
+
+    核心逻辑：
+    1. 先对 note_id 去重，避免同一笔记被多个搜索条件重复计数。
+    2. 逐条读取笔记，缺失、空文本、字段异常、已有音频标记都会单独计数。
+    3. 媒体文件已存在但字段还没写 sound 标记时，仍保留为任务，因为执行阶段需要补标记。
+    """
+    plan = TtsTaskPlan(source_note_count=len(note_ids))  # 说明：创建统计对象，并记录原始输入数量
     tts_cfg = config  # 说明：直接使用传入配置
     text_field_index = int(tts_cfg.get("text_field_index", 0))  # 说明：读取文本字段索引
     audio_field_index = int(tts_cfg.get("audio_field_index", 0))  # 说明：读取音频写入字段索引
     default_voice = str(tts_cfg.get("azure", {}).get("default_voice", ""))  # 说明：读取默认音色
     if not default_voice:  # 说明：未设置默认音色则不生成任务
-        return tasks  # 说明：直接返回空任务列表
-    for note_id in note_ids:  # 说明：逐笔记构建任务
+        logger.warning("TTS 扫描停止：尚未选择默认音色")  # 说明：写日志，避免界面只显示 0 条却不知道原因
+        return plan  # 说明：直接返回空计划
+    unique_note_ids = [int(note_id) for note_id in dict.fromkeys(note_ids)]  # 说明：去重并保留 Anki 搜索结果顺序
+    plan.candidate_note_count = len(unique_note_ids)  # 说明：记录去重后的候选数量
+    overwrite = bool(tts_cfg.get("overwrite_existing_audio", False))  # 说明：覆盖模式下已有标记也需要重新处理
+    rate = str(tts_cfg.get("azure", {}).get("defaults", {}).get("rate", "1"))  # 说明：语速会参与文件名哈希，必须与执行阶段保持一致
+    for note_id in unique_note_ids:  # 说明：逐笔记构建任务
         note = mw.col.get_note(note_id)  # 说明：读取笔记
-        if text_field_index >= len(note.fields):  # 说明：索引越界
+        if note is None:  # 说明：笔记可能已被删除，或历史导入范围里保留了旧 ID
+            plan.missing_note_count += 1  # 说明：记录缺失数量
+            plan.missing_note_ids.append(note_id)  # 说明：保留 ID，方便日志定位
+            continue  # 说明：缺失笔记无法生成任务
+        if text_field_index < 0 or text_field_index >= len(note.fields):  # 说明：索引越界
+            plan.field_error_count += 1  # 说明：记录字段配置异常
+            plan.field_error_note_ids.append(note_id)  # 说明：记录问题笔记
             continue  # 说明：跳过该笔记
         text = note.fields[text_field_index]  # 说明：读取文本内容
         if not text:  # 说明：空文本无需合成
+            plan.empty_text_count += 1  # 说明：记录空文本数量
             continue  # 说明：跳过该笔记
         field_names = _get_note_field_names(note)  # 说明：获取字段名列表
-        if not field_names:  # 说明：字段名为空无法写入
+        if not field_names or audio_field_index < 0:  # 说明：字段名为空或写入索引非法
+            plan.field_error_count += 1  # 说明：记录字段配置异常
+            plan.field_error_note_ids.append(note_id)  # 说明：记录问题笔记
             continue  # 说明：跳过该笔记
         target_field = field_names[audio_field_index] if audio_field_index < len(field_names) else field_names[0]  # 说明：获取写入字段名
-        tasks.append(TtsTask(note_id=note_id, text=text, voice_name=default_voice, target_field=target_field))  # 说明：创建任务对象
-    return tasks  # 说明：返回任务列表
+        if not overwrite and _field_has_audio_marker(note, target_field):  # 说明：已有音频标记时执行阶段也只会跳过
+            plan.already_marked_count += 1  # 说明：扫描阶段提前说明跳过原因
+            continue  # 说明：不再放入执行任务，避免“待生成”虚高
+        filename = build_audio_filename(text, default_voice, rate=rate)  # 说明：计算执行阶段会使用的媒体文件名
+        task = TtsTask(note_id=note_id, text=text, voice_name=default_voice, target_field=target_field)  # 说明：创建任务对象
+        plan.tasks.append(task)  # 说明：加入执行列表
+        if not overwrite and mw.col.media.have(filename):  # 说明：媒体已存在，执行阶段只会补 sound 标记
+            plan.reusable_media_count += 1  # 说明：记录可复用数量
+        else:  # 说明：媒体不存在或覆盖模式开启
+            plan.needs_generation_count += 1  # 说明：记录需要真实调用 TTS 的数量
+    return plan  # 说明：返回完整扫描计划
 
 
 def _get_note_field_names(note) -> List[str]:  # 说明：安全获取字段名列表
@@ -291,10 +334,20 @@ def _http_request(url: str, method: str, headers: Dict[str, str], data: Optional
     for key, value in headers.items():  # 说明：写入请求头
         req.add_header(key, value)  # 说明：追加头字段
     try:  # 说明：捕获网络异常
+        logger.info(f"TTS HTTP 请求: method={method} url={url}")  # 说明：日志只记录方法和 URL，不记录 Key 等敏感请求头
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # 说明：发送请求
             return resp.read()  # 说明：读取响应内容
+    except urllib.error.HTTPError as exc:  # 说明：服务端返回 4xx/5xx 时保留状态码与响应片段
+        try:  # 说明：响应体可能不是文本，读取失败时也不能影响主错误
+            body = exc.read().decode("utf-8", errors="replace")[:500]  # 说明：截断响应体，避免弹窗过长
+        except Exception:  # 说明：响应体读取失败
+            body = ""  # 说明：兜底为空
+        raise TtsError(f"HTTP 请求失败: method={method} url={url} status={exc.code} response={body}")  # 说明：抛出可定位的错误
+    except urllib.error.URLError as exc:  # 说明：DNS、代理、证书、系统文件等 URL 打开阶段错误
+        reason = getattr(exc, "reason", exc)  # 说明：URLError 的真实原因在 reason 字段里
+        raise TtsError(f"HTTP 请求失败: method={method} url={url} reason={reason}")  # 说明：保留 URL 与底层原因
     except Exception as exc:  # 说明：捕获异常
-        raise TtsError(f"HTTP 请求失败: {exc}")  # 说明：抛出统一异常
+        raise TtsError(f"HTTP 请求失败: method={method} url={url} error={exc}")  # 说明：抛出统一异常
 
 
 def _ensure_http_url(value: str, field_name: str) -> None:  # 说明：检查 URL 是否包含协议
