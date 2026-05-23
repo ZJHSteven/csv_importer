@@ -1,10 +1,10 @@
 # 项目状态快照（保持短小：建议 <= 200~400 行）
 
 ## 当前结论（必须最新）
-- 现状：正在修复 Azure TTS 遇到字段内 `&nbsp;` 等 HTML 实体时返回 `400` 的问题；根因已定位为插件把原始字段文本直接插入 SSML，导致 XML 非法。
-- 已完成：确认运行日志位置为 `user_files/logs/csv_importer.log`，复现出 `note_id=1779258030286` 因 `abductor pollicis longus&nbsp;` 触发 `HTTP 400`，并用本地 XML 解析器复现 `undefined entity`。
-- 正在做：为 TTS 文本增加 HTML 实体解码、HTML 标签清理、XML 转义，以及发送前的本地 SSML 校验；同步补充单元测试覆盖。
-- 下一步：跑完测试并在 Anki 现场再次验证这条笔记可正常生成音频。
+- 现状：Azure TTS 针对字段内 `&nbsp;` 等 HTML 实体的 `HTTP 400` 已完成修复；插件现在会先规整文本，再本地校验 SSML，避免把非法 XML 发到 Azure。
+- 已完成：确认运行日志位置为 `user_files/logs/csv_importer.log`；复现出 `note_id=1779258030286` 因 `abductor pollicis longus&nbsp;` 触发 `HTTP 400`；为 TTS 文本增加 HTML 实体解码、HTML 标签清理、XML 转义；新增发送前 SSML 本地校验；补充并通过 8 条单元测试；用真实问题文本完成最小 SSML 渲染与 XML 解析验证。
+- 正在做：暂无。
+- 下一步：在 Anki 里重新对 `note_id=1779258030286` 执行一次 TTS，确认现场也成功生成音频并写回 `[sound:...]` 标记。
 
 ## 关键决策与理由（防止“吃书”）
 - 决策A：扫描阶段输出分类统计，而不是只显示总任务数。（原因：用户看到 325 张卡却出现 400 多条“待生成”时，需要知道差异来自候选范围、复用媒体、已有标记还是异常笔记。）
