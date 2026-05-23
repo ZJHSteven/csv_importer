@@ -5,6 +5,7 @@
 
 from __future__ import annotations  # 说明：允许前向引用类型标注
 
+import html  # 说明：用于把字段中的 HTML 实体还原成真实字符
 import hashlib  # 说明：用于生成稳定文件名
 import re  # 说明：用于清理旧音频标记
 import json  # 说明：用于自定义请求体处理
@@ -14,6 +15,8 @@ import urllib.request  # 说明：使用标准库发起 HTTP 请求
 from concurrent.futures import ThreadPoolExecutor, as_completed  # 说明：并发下载音频
 from typing import Any, Callable, Dict, List, Optional, Tuple  # 说明：类型标注所需
 from urllib.parse import urlparse  # 说明：解析 URL 以做基础校验
+from xml.etree import ElementTree  # 说明：用于在本地校验生成后的 SSML 是否是合法 XML
+from xml.sax.saxutils import escape as xml_escape  # 说明：用于转义 XML/SSML 中的特殊字符
 
 from .addon_errors import TtsError, logger  # 说明：统一异常与日志
 from .addon_models import TtsResult, TtsTask, TtsTaskPlan  # 说明：TTS 数据结构
@@ -47,10 +50,16 @@ def azure_synthesize(  # 说明：Azure 合成入口
     defaults = dict(azure_cfg.get("defaults", {}))  # 说明：读取默认变量
     payload_vars: Dict[str, Any] = {}  # 说明：准备模板变量
     payload_vars.update(defaults)  # 说明：先写入默认变量
-    payload_vars.update({"text": text, "voice_name": voice_name})  # 说明：写入核心变量
+    payload_vars.update(  # 说明：写入核心变量；文本先规整成合法 SSML 内容，避免 HTML 实体或特殊字符把 XML 弄坏
+        {
+            "text": _prepare_text_for_ssml(text),
+            "voice_name": xml_escape(str(voice_name), {'"': "&quot;", "'": "&apos;"}),
+        }
+    )
     if variables:  # 说明：合并额外变量
         payload_vars.update(variables)  # 说明：覆盖或补充
     ssml = _safe_format(template, payload_vars)  # 说明：渲染 SSML
+    _validate_ssml(ssml)  # 说明：在真正发 HTTP 请求前先做一次本地 XML 校验，方便把问题定位到文本或模板
     data = _http_request(url, "POST", headers=headers, data=ssml.encode("utf-8"), timeout=azure_cfg.get("timeout_seconds", 20))  # 说明：发起合成请求
     return data  # 说明：返回音频数据
 
@@ -327,6 +336,38 @@ def _safe_format(template: str, variables: Dict[str, Any]) -> str:  # 说明：�
         return template.format(**variables)  # 说明：执行格式化
     except KeyError as exc:  # 说明：缺失变量
         raise TtsError(f"SSML 模板变量缺失: {exc}")  # 说明：抛出统一异常
+
+
+def _prepare_text_for_ssml(text: str) -> str:  # 说明：把字段文本规整成适合嵌入 SSML 的安全文本
+    """把 Anki 字段文本转换为可安全插入 SSML 的纯文本。
+
+    输入：
+    - text：笔记字段里的原始文本，可能包含 HTML 实体、HTML 标签、换行或 XML 特殊字符。
+
+    输出：
+    - 适合直接放进 SSML 文本节点里的字符串；其中会保留文本内容，但会避免破坏 XML 结构。
+
+    核心逻辑：
+    1. 先把 `&nbsp;` 这类 HTML 实体还原为真实字符，避免 XML 解析阶段把它当成“未定义实体”。
+    2. 将 `<br>`、`<div>`、`<p>` 等常见块级标签转成空格，尽量保留阅读停顿。
+    3. 去掉其余 HTML 标签，避免把样式标签读成正文。
+    4. 最后对 `& < > " '` 做 XML 转义，确保插入到 SSML 后仍是合法 XML。
+    """
+    normalized = html.unescape(str(text))  # 说明：先把 HTML 实体转回真实字符，例如把 &nbsp; 变成 U+00A0
+    normalized = normalized.replace("\xa0", " ")  # 说明：把不换行空格统一成普通空格，减少发音和显示差异
+    normalized = re.sub(r"(?i)<\s*br\s*/?\s*>", " ", normalized)  # 说明：换行标签转换为空格
+    normalized = re.sub(r"(?i)</?\s*(div|p|li|ul|ol|tr|td|th|table)\b[^>]*>", " ", normalized)  # 说明：常见块级标签转空格
+    normalized = re.sub(r"<[^>]+>", "", normalized)  # 说明：移除剩余 HTML 标签，只保留可朗读文本
+    normalized = re.sub(r"\s+", " ", normalized).strip()  # 说明：压缩多余空白，避免标签替换后产生大量空格
+    return xml_escape(normalized, {'"': "&quot;", "'": "&apos;"})  # 说明：转义 XML 特殊字符，保证能安全嵌入 SSML
+
+
+def _validate_ssml(ssml: str) -> None:  # 说明：在发送到 Azure 之前本地验证 SSML 是否是合法 XML
+    try:  # 说明：把最终字符串交给 XML 解析器做最小合法性校验
+        ElementTree.fromstring(ssml)  # 说明：只要能成功解析，就说明 XML 结构至少是合法的
+    except ElementTree.ParseError as exc:  # 说明：模板或插值结果让 SSML 失效时，优先在本地给出清晰错误
+        preview = ssml[:200].replace("\n", " ")  # 说明：截断预览，避免错误信息过长
+        raise TtsError(f"SSML 本地校验失败: {exc}; 预览={preview}")  # 说明：把 XML 解析器的定位信息带给用户
 
 
 def _http_request(url: str, method: str, headers: Dict[str, str], data: Optional[bytes], timeout: int) -> bytes:  # 说明：发送 HTTP 请求

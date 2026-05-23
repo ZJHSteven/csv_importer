@@ -15,6 +15,7 @@ import unittest
 import urllib.error
 from pathlib import Path
 from unittest.mock import patch
+from xml.etree import ElementTree
 
 
 ROOT = Path(__file__).resolve().parents[1]  # 说明：插件根目录，用于把源码当作临时包加载
@@ -145,6 +146,59 @@ class HttpRequestTests(unittest.TestCase):
         self.assertIn("method=POST", message)
         self.assertIn("https://example.invalid/cognitiveservices/v1", message)
         self.assertIn("No such file or directory", message)
+
+
+class SsmlPreparationTests(unittest.TestCase):
+    """覆盖 SSML 文本规整与本地校验，避免非法 XML 打到线上接口才失败。"""
+
+    def test_prepare_text_for_ssml_unescapes_html_entity_and_escapes_xml(self):
+        prepared = addon_tts._prepare_text_for_ssml("abductor&nbsp;&amp; pollicis <longus>")
+
+        self.assertEqual(prepared, "abductor &amp; pollicis")
+
+    def test_prepare_text_for_ssml_strips_common_html_tags(self):
+        prepared = addon_tts._prepare_text_for_ssml("<div>Hello<br>world</div><b>!</b>")
+
+        self.assertEqual(prepared, "Hello world!")
+
+    def test_azure_synthesize_sends_xml_valid_ssml_after_normalization(self):
+        azure_cfg = {
+            "base_url": "https://example.cognitiveservices.azure.com",
+            "subscription_key": "test-key",
+            "endpoints": {"synthesize": "/cognitiveservices/v1"},
+            "headers": {"synthesize": {"Content-Type": "application/ssml+xml"}},
+            "ssml_template": '<speak version="1.0" xml:lang="{lang}"><voice name="{voice_name}"><prosody rate="{rate}">{text}</prosody></voice></speak>',
+            "defaults": {"lang": "en-US", "rate": "1.0"},
+            "timeout_seconds": 20,
+        }
+        captured = {}
+
+        def fake_http_request(url, method, headers, data, timeout):
+            captured["url"] = url
+            captured["method"] = method
+            captured["headers"] = headers
+            captured["timeout"] = timeout
+            captured["ssml"] = data.decode("utf-8")
+            return b"audio-bytes"
+
+        with patch.object(addon_tts, "_http_request", side_effect=fake_http_request):
+            audio = addon_tts.azure_synthesize(
+                azure_cfg,
+                "abductor pollicis longus&nbsp;",
+                "en-US-TestNeural",
+            )
+
+        self.assertEqual(audio, b"audio-bytes")
+        self.assertEqual(captured["method"], "POST")
+        self.assertIn("abductor pollicis longus", captured["ssml"])
+        self.assertNotIn("&nbsp;", captured["ssml"])
+        ElementTree.fromstring(captured["ssml"])
+
+    def test_validate_ssml_raises_local_error_for_broken_template(self):
+        with self.assertRaises(Exception) as ctx:
+            addon_tts._validate_ssml('<speak><voice name="x">broken &nbsp;</voice></speak>')
+
+        self.assertIn("SSML 本地校验失败", str(ctx.exception))
 
 
 if __name__ == "__main__":
