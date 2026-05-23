@@ -359,6 +359,7 @@ def _prepare_text_for_ssml(text: str) -> str:  # 说明：把字段文本规整�
     normalized = re.sub(r"(?i)</?\s*(div|p|li|ul|ol|tr|td|th|table)\b[^>]*>", " ", normalized)  # 说明：常见块级标签转空格
     normalized = re.sub(r"<[^>]+>", "", normalized)  # 说明：移除剩余 HTML 标签，只保留可朗读文本
     normalized = re.sub(r"\s+", " ", normalized).strip()  # 说明：压缩多余空白，避免标签替换后产生大量空格
+    normalized = re.sub(r"\s+([,.;:!?])", r"\1", normalized)  # 说明：清理标点前多余空格，避免朗读时出现奇怪停顿
     return xml_escape(normalized, {'"': "&quot;", "'": "&apos;"})  # 说明：转义 XML 特殊字符，保证能安全嵌入 SSML
 
 
